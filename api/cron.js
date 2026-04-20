@@ -1,4 +1,4 @@
-import { Redis } from '@upstash/redis';
+const { Redis } = require('@upstash/redis');
 
 const kv = new Redis({
   url: process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL,
@@ -73,8 +73,7 @@ function utcToday() {
   return new Date().toISOString().slice(0, 10);
 }
 
-export default async function handler(req, res) {
-  // Allow Vercel cron (POST) and manual browser trigger (GET).
+module.exports = async function handler(req, res) {
   const cronSecret = process.env.CRON_SECRET;
   if (
     cronSecret &&
@@ -109,4 +108,4 @@ export default async function handler(req, res) {
     console.error('Cron failed:', msg);
     return res.status(500).json({ error: msg });
   }
-}
+};
