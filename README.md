@@ -1,5 +1,5 @@
 
-# FB Ads Library — Active Count Tracker
+# FB Ads Library — Active Count Tracker.
 
 Daily snapshot of how many **active ads** a specific Facebook Page is running
 in Hong Kong, fetched from the official
