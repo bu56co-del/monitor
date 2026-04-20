@@ -1,4 +1,4 @@
-import { Redis } from '@upstash/redis';
+const { Redis } = require('@upstash/redis');
 
 const kv = new Redis({
   url: process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL,
@@ -28,7 +28,7 @@ function findRowOnOrBefore(rows, targetDate) {
   return candidate;
 }
 
-export default async function handler(req, res) {
+module.exports = async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Cache-Control', 's-maxage=300, stale-while-revalidate=60');
 
@@ -63,4 +63,4 @@ export default async function handler(req, res) {
     console.error('data API error:', err.message);
     return res.status(500).json({ error: 'Failed to read history' });
   }
-}
+};
