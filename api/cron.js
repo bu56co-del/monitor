@@ -1,9 +1,7 @@
 const { Redis } = require('@upstash/redis');
 
-const kv = new Redis({
-  url: process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL,
-  token: process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN,
-});
+const KV_URL = process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL;
+const KV_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN;
 
 const PAGE_ID = '110379081699089';
 const COUNTRY = 'HK';
@@ -75,25 +73,46 @@ function utcToday() {
 
 module.exports = async function handler(req, res) {
   const cronSecret = process.env.CRON_SECRET;
-  if (
-    cronSecret &&
-    req.method === 'POST' &&
-    req.headers.authorization !== `Bearer ${cronSecret}`
-  ) {
+  if (cronSecret && req.headers.authorization !== `Bearer ${cronSecret}`) {
     return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+  if (!KV_URL || !KV_TOKEN) {
+    return res.status(500).json({
+      stage: 'config',
+      error: 'KV not configured',
+      detail: 'Missing UPSTASH_REDIS_REST_URL / UPSTASH_REDIS_REST_TOKEN (or KV_REST_API_URL / KV_REST_API_TOKEN).',
+    });
   }
 
   const token = process.env.FB_ACCESS_TOKEN?.trim();
   if (!token) {
-    return res.status(500).json({ error: 'FB_ACCESS_TOKEN environment variable is not set' });
+    return res.status(500).json({
+      stage: 'config',
+      error: 'FB_ACCESS_TOKEN environment variable is not set',
+    });
+  }
+
+  let count;
+  try {
+    count = await fetchCount(token);
+  } catch (err) {
+    const msg = redact(err.message, process.env.FB_ACCESS_TOKEN);
+    console.error('FB fetch failed:', msg);
+    return res.status(500).json({ stage: 'fb_fetch', error: msg });
   }
 
   try {
-    const count = await fetchCount(token);
+    const kv = new Redis({ url: KV_URL, token: KV_TOKEN });
     const date = utcToday();
     const fetched_at_utc = new Date().toISOString().replace(/\.\d+Z$/, 'Z');
 
-    const history = (await kv.get('history')) ?? [];
+    let history = (await kv.get('history')) ?? [];
+    if (typeof history === 'string') {
+      try { history = JSON.parse(history); } catch { history = []; }
+    }
+    if (!Array.isArray(history)) history = [];
+
     const updated = history
       .filter((r) => r.date !== date)
       .concat({ date, count, fetched_at_utc })
@@ -105,7 +124,7 @@ module.exports = async function handler(req, res) {
     return res.status(200).json({ date, count, total_rows: updated.length });
   } catch (err) {
     const msg = redact(err.message, process.env.FB_ACCESS_TOKEN);
-    console.error('Cron failed:', msg);
-    return res.status(500).json({ error: msg });
+    console.error('KV write failed:', msg);
+    return res.status(500).json({ stage: 'kv_write', error: msg, fetched_count: count });
   }
 };

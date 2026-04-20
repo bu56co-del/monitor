@@ -1,9 +1,7 @@
 const { Redis } = require('@upstash/redis');
 
-const kv = new Redis({
-  url: process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL,
-  token: process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN,
-});
+const KV_URL = process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL;
+const KV_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN;
 
 const WINDOWS = [
   { label: 'Daily',     days: 1   },
@@ -32,8 +30,21 @@ module.exports = async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Cache-Control', 's-maxage=300, stale-while-revalidate=60');
 
+  if (!KV_URL || !KV_TOKEN) {
+    return res.status(500).json({
+      error: 'KV not configured',
+      detail: 'Missing UPSTASH_REDIS_REST_URL / UPSTASH_REDIS_REST_TOKEN (or KV_REST_API_URL / KV_REST_API_TOKEN). Attach an Upstash Redis database in Vercel → Storage, then redeploy.',
+    });
+  }
+
   try {
-    const history = (await kv.get('history')) ?? [];
+    const kv = new Redis({ url: KV_URL, token: KV_TOKEN });
+    let history = (await kv.get('history')) ?? [];
+
+    if (typeof history === 'string') {
+      try { history = JSON.parse(history); } catch { history = []; }
+    }
+    if (!Array.isArray(history)) history = [];
 
     if (history.length === 0) {
       return res.status(200).json({ current: null, diffs: [], total_snapshots: 0 });
@@ -61,6 +72,6 @@ module.exports = async function handler(req, res) {
     return res.status(200).json({ current: latest, diffs, total_snapshots: history.length });
   } catch (err) {
     console.error('data API error:', err.message);
-    return res.status(500).json({ error: 'Failed to read history' });
+    return res.status(500).json({ error: 'Failed to read history', detail: err.message });
   }
 };
