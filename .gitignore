@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Never commit secrets.
+.env
+.env.*
+token.txt
+*.secret
