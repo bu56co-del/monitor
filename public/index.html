@@ -266,13 +266,17 @@
     `).join('');
   }
 
+  async function fetchData() {
+    const res = await fetch(`/api/data?t=${Date.now()}`, { cache: 'no-store' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return res.json();
+  }
+
   async function load() {
     const btn = document.getElementById('refresh');
     btn.disabled = true;
     try {
-      const res = await fetch('/api/data', { cache: 'no-store' });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
+      const data = await fetchData();
       document.getElementById('rows').innerHTML =
         (data.targets || []).map(renderRow).join('') ||
         '<tr><td colspan="8" style="text-align:center;padding:1.5rem;color:#555">No targets configured</td></tr>';
@@ -287,6 +291,15 @@
     }
   }
 
+  // Refresh just the errors panel without touching the rows table — so the
+  // inline flash message next to the Fetch button stays visible.
+  async function loadErrors() {
+    try {
+      const data = await fetchData();
+      renderErrors(data.errors || []);
+    } catch { /* silent — flash already shows the failure */ }
+  }
+
   function flash(id, msg, isErr) {
     const el = document.querySelector(`[data-flash="${id}"]`);
     if (!el) return;
@@ -299,19 +312,21 @@
     btn.disabled = true;
     btn.textContent = '… fetching';
     flash(id, '');
+    let ok = false;
     try {
       const res = await fetch(`/api/trigger?id=${encodeURIComponent(id)}`, { method: 'POST' });
       const body = await res.json();
       if (!res.ok) throw new Error(body.error || body.detail || `HTTP ${res.status}`);
       flash(id, `✓ ${body.count} (${(body.tookMs / 1000).toFixed(1)}s)`);
+      ok = true;
     } catch (e) {
       flash(id, `✗ ${e.message}`, true);
     } finally {
       btn.disabled = false;
       btn.textContent = '↻ Fetch now';
-      // Always refresh so the errors panel reflects the latest result even
-      // when the request failed (the server still logged it).
-      load().catch(() => {});
+      // On success we reload everything (count changed). On failure we
+      // only refresh the errors panel so the inline flash survives.
+      (ok ? load() : loadErrors()).catch(() => {});
     }
   }
 
