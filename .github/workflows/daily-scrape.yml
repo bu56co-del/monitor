@@ -5,7 +5,12 @@ on:
     # HKT 21:00–08:00 (= UTC 13:00–00:00), one target per hour
     - cron: "0 13-23 * * *"
     - cron: "0 0 * * *"
-  workflow_dispatch:          # manual = scrape ALL targets at once
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "Target index (0-11) or 'all'"
+        required: false
+        default: "all"
 
 concurrency:
   group: daily-scrape
@@ -14,7 +19,7 @@ concurrency:
 jobs:
   scrape:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 45
     steps:
       - name: Wake up Render
         env:
@@ -28,6 +33,7 @@ jobs:
         env:
           RENDER_URL: ${{ secrets.RENDER_URL }}
           GITHUB_EVENT: ${{ github.event_name }}
+          TARGET_INPUT: ${{ github.event.inputs.target }}
         run: |
           set -eo pipefail
 
@@ -47,10 +53,16 @@ jobs:
             107468998477970    # 11 Perle signature
           )
 
-          # Manual dispatch → scrape all 12
+          # Manual dispatch → single target or all (one by one)
           if [ "$GITHUB_EVENT" = "workflow_dispatch" ]; then
-            echo "Manual trigger — scraping all ${#TARGETS[@]} targets"
-            INDICES=($(seq 0 11))
+            INPUT="${TARGET_INPUT:-all}"
+            if [ "$INPUT" = "all" ]; then
+              echo "Manual trigger — scraping all ${#TARGETS[@]} targets (one by one)"
+              INDICES=($(seq 0 11))
+            else
+              echo "Manual trigger — scraping target $INPUT only"
+              INDICES=("$INPUT")
+            fi
           else
             # Scheduled: map UTC hour → 1 target
             # UTC 13 = HKT 21 → 0
@@ -90,7 +102,10 @@ jobs:
             curl --fail --show-error --max-time 180 --retry 1 \
               "${RENDER_URL}/api/trigger?id=${ID}"
             echo ""
-            if [ "$i" != "${INDICES[-1]}" ]; then sleep 10; fi
+            if [ "$i" != "${INDICES[-1]}" ]; then
+              echo "Waiting 90s for Render to free memory..."
+              sleep 90
+            fi
           done
 
           echo "Done."
