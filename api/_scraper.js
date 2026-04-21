@@ -3,7 +3,8 @@ const puppeteer = require('puppeteer-core');
 const fs = require('fs');
 const path = require('path');
 const zlib = require('zlib');
-const { spawnSync } = require('child_process');
+const tar = require('tar');
+const { pipeline } = require('stream/promises');
 
 const USER_AGENT =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 ' +
@@ -54,9 +55,8 @@ function chromiumDiagnostics() {
 // @sparticuz/chromium picks al2 vs al2023 by sniffing /etc/os-release. On
 // Vercel's Fluid Compute runtime that sniff comes up empty so NEITHER OS
 // tarball gets inflated and chromium then fails to dlopen libnss3. Force
-// the extraction ourselves: brotli-decompress with Node's zlib, then shell
-// out to the system `tar` (standard on Vercel's Linux base) to extract
-// into /tmp. Idempotent — skips if the libs already exist.
+// the extraction ourselves via a pure-JS pipeline (brotli → tar) straight
+// into /tmp — no system `tar` binary needed. Idempotent.
 async function ensureOsLibsExtracted() {
   if (fs.existsSync('/tmp/libnss3.so')) return;
 
@@ -71,17 +71,12 @@ async function ensureOsLibsExtracted() {
 
   const errors = [];
   for (const brPath of brTars) {
-    const tmpTar = path.join('/tmp', `${path.basename(brPath, '.br')}`);
     try {
-      const compressed = fs.readFileSync(brPath);
-      const decompressed = zlib.brotliDecompressSync(compressed);
-      fs.writeFileSync(tmpTar, decompressed);
-      const r = spawnSync('tar', ['-xf', tmpTar, '-C', '/tmp'], { encoding: 'utf8' });
-      try { fs.unlinkSync(tmpTar); } catch {}
-      if (r.status !== 0) {
-        errors.push(`tar(${path.basename(brPath)}) exit ${r.status}: ${(r.stderr || '').trim()}`);
-        continue;
-      }
+      await pipeline(
+        fs.createReadStream(brPath),
+        zlib.createBrotliDecompress(),
+        tar.x({ cwd: '/tmp' }),
+      );
     } catch (e) {
       errors.push(`${path.basename(brPath)}: ${e.message}`);
       continue;
