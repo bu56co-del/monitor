@@ -304,12 +304,14 @@
       const body = await res.json();
       if (!res.ok) throw new Error(body.error || body.detail || `HTTP ${res.status}`);
       flash(id, `✓ ${body.count} (${(body.tookMs / 1000).toFixed(1)}s)`);
-      await load();
     } catch (e) {
       flash(id, `✗ ${e.message}`, true);
     } finally {
       btn.disabled = false;
       btn.textContent = '↻ Fetch now';
+      // Always refresh so the errors panel reflects the latest result even
+      // when the request failed (the server still logged it).
+      load().catch(() => {});
     }
   }
 
