@@ -1,5 +1,7 @@
 const chromium = require('@sparticuz/chromium');
 const puppeteer = require('puppeteer-core');
+const fs = require('fs');
+const path = require('path');
 
 const USER_AGENT =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 ' +
@@ -20,14 +22,47 @@ function adLibraryUrl(pageId, country = 'HK') {
   return `https://www.facebook.com/ads/library/?${params.toString()}`;
 }
 
+function safeLs(dir) {
+  try {
+    return fs.readdirSync(dir).map((f) => {
+      try {
+        const st = fs.statSync(path.join(dir, f));
+        return `${f}${st.isDirectory() ? '/' : ''}(${st.size})`;
+      } catch {
+        return f;
+      }
+    });
+  } catch (e) {
+    return [`ERR: ${e.code || e.message}`];
+  }
+}
+
+function chromiumDiagnostics() {
+  const pkgBin = 'node_modules/@sparticuz/chromium/bin';
+  const candidates = [
+    pkgBin,
+    path.join(process.cwd(), pkgBin),
+    path.join('/var/task', pkgBin),
+  ];
+  const resolved = {};
+  for (const p of candidates) resolved[p] = safeLs(p);
+  return { cwd: process.cwd(), bin: resolved, tmp: safeLs('/tmp') };
+}
+
 async function launchBrowser() {
-  return puppeteer.launch({
-    args: [...chromium.args, '--hide-scrollbars', '--disable-web-security'],
-    defaultViewport: { width: 1280, height: 900 },
-    executablePath: await chromium.executablePath(),
-    headless: chromium.headless,
-    ignoreHTTPSErrors: true,
-  });
+  try {
+    return await puppeteer.launch({
+      args: [...chromium.args, '--hide-scrollbars', '--disable-web-security'],
+      defaultViewport: { width: 1280, height: 900 },
+      executablePath: await chromium.executablePath(),
+      headless: chromium.headless,
+      ignoreHTTPSErrors: true,
+    });
+  } catch (err) {
+    const diag = chromiumDiagnostics();
+    err.message = `${err.message} | diag=${JSON.stringify(diag)}`;
+    throw err;
+  }
 }
 
 // Extracts "~N results" (or variants) from rendered page text.
