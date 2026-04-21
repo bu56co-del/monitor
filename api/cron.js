@@ -2,22 +2,10 @@ const TARGETS = require('./_targets');
 const { getKv, isKvConfigured, upsertHistory, logError } = require('./_kv');
 const { launchBrowser, scrapeTarget } = require('./_scraper');
 
-// Cron runs hourly from 17:00 to 23:00 UTC (HKT 01:00-07:00, a 7-hour window).
-// Each run scrapes the subset of targets whose index % 7 equals this hour's
-// offset from 17. With N targets, each target is scraped exactly once per day.
-const FIRST_HOUR = 17;
-const WINDOW_HOURS = 7;
-
-function hourOffset(now = new Date()) {
-  const h = now.getUTCHours();
-  const offset = h - FIRST_HOUR;
-  if (offset < 0 || offset >= WINDOW_HOURS) return null;
-  return offset;
-}
-
-function pickTargets(targets, offset) {
-  return targets.filter((_, i) => i % WINDOW_HOURS === offset);
-}
+// Vercel Hobby plan only permits once-per-day cron. We run at 17:00 UTC
+// (HKT 01:00 — local middle of the night) and scrape every target in one
+// sequential pass, with short random delays between each to avoid looking
+// like a synchronous burst.
 
 function utcToday() {
   return new Date().toISOString().slice(0, 10);
@@ -49,24 +37,9 @@ module.exports = async function handler(req, res) {
     });
   }
 
-  // Allow manual GET/POST with `?force=1` to scrape the whole list even
-  // outside the cron window — handy for first-time seeding.
-  const force = req.query?.force === '1' || req.url?.includes('force=1');
-  const offset = hourOffset();
-  let batch;
-  if (force) {
-    batch = TARGETS;
-  } else if (offset === null) {
-    return res.status(200).json({
-      skipped: true,
-      reason: `Outside cron window (UTC ${FIRST_HOUR}:00-${FIRST_HOUR + WINDOW_HOURS - 1}:59)`,
-    });
-  } else {
-    batch = pickTargets(TARGETS, offset);
-  }
-
+  const batch = TARGETS;
   if (batch.length === 0) {
-    return res.status(200).json({ skipped: true, reason: 'No targets for this hour' });
+    return res.status(200).json({ skipped: true, reason: 'No targets configured' });
   }
 
   const kv = getKv();
@@ -112,7 +85,9 @@ module.exports = async function handler(req, res) {
       }
 
       // Randomised delay between targets to avoid looking like a burst.
-      if (i < batch.length - 1) await sleep(jitter(5000, 15000));
+      // Kept tight (2-6s) because we must finish all targets within the
+      // 300s serverless maxDuration.
+      if (i < batch.length - 1) await sleep(jitter(2000, 6000));
     }
   } finally {
     try { await browser.close(); } catch { /* ignore */ }
@@ -122,8 +97,6 @@ module.exports = async function handler(req, res) {
   const failed = results.length - ok;
   return res.status(failed > 0 ? 207 : 200).json({
     date,
-    offset,
-    window: `UTC ${FIRST_HOUR}:00-${FIRST_HOUR + WINDOW_HOURS - 1}:59`,
     scraped: results.length,
     ok,
     failed,
