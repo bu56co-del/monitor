@@ -1,0 +1,15 @@
+node_modules
+data
+.git
+.github
+.vercel
+.DS_Store
+scripts/__pycache__
+*.pyc
+.venv
+venv
+.env
+.env.*
+token.txt
+*.secret
+README.md

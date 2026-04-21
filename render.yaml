@@ -1,0 +1,41 @@
+# Render blueprint — declares both the web dashboard and the daily
+# cron job. On first deploy Render reads this file and offers to
+# create both services. Update via git push.
+#
+# After first deploy, set UPSTASH_REDIS_REST_URL + UPSTASH_REDIS_REST_TOKEN
+# in both services' Environment Variables (they're declared `sync: false`
+# so they're NOT committed to git).
+
+services:
+  # Web service — serves the dashboard at https://<name>.onrender.com
+  - type: web
+    name: fb-ads-monitor
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    region: singapore
+    envVars:
+      - key: RENDER
+        value: "true"
+      - key: UPSTASH_REDIS_REST_URL
+        sync: false
+      - key: UPSTASH_REDIS_REST_TOKEN
+        sync: false
+
+  # Cron job — scrapes every target once per day at 02:00 UTC (10:00 HKT).
+  # Overrides the Dockerfile CMD to run the standalone scraper.
+  - type: cron
+    name: fb-ads-cron-daily
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    region: singapore
+    schedule: "0 2 * * *"
+    dockerCommand: node scripts/scrape-all.js
+    envVars:
+      - key: RENDER
+        value: "true"
+      - key: UPSTASH_REDIS_REST_URL
+        sync: false
+      - key: UPSTASH_REDIS_REST_TOKEN
+        sync: false
