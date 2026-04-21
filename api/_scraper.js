@@ -172,8 +172,14 @@ async function launchBrowser() {
     const execPath = await chromium.executablePath();
     const stderr = [];
     const events = [];
+    // @sparticuz/chromium's default args already include --single-process and
+    // --no-zygote, which are fatal on pages that use @font-face src: local()
+    // (chromium NOTREACHEDs in remote_font_face_source.cc). Strip them.
+    const baseArgs = chromium.args.filter(
+      (a) => a !== '--single-process' && a !== '--no-zygote',
+    );
     const browser = await puppeteer.launch({
-      args: [...chromium.args, ...EXTRA_CHROMIUM_ARGS],
+      args: [...baseArgs, ...EXTRA_CHROMIUM_ARGS],
       defaultViewport: { width: 1280, height: 900 },
       executablePath: execPath,
       headless: chromium.headless,
