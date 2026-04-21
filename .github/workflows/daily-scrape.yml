@@ -20,7 +20,9 @@ jobs:
           RENDER_URL: ${{ secrets.RENDER_URL }}
         run: |
           echo "Waking up Render (cold start may take ~60s)..."
-          curl -s --max-time 120 --retry 2 --retry-delay 10 "$RENDER_URL" > /dev/null
+          curl --fail --show-error -s --max-time 120 --retry 2 --retry-delay 10 \
+            -o /dev/null -w "Wake up: HTTP %{http_code} in %{time_total}s\n" \
+            "${RENDER_URL%/}"
           echo "Render is awake. Waiting 10s before starting..."
           sleep 10
 
@@ -55,7 +57,7 @@ jobs:
 
             # 2 minute timeout per target — skip if stuck
             if curl -X POST --fail --show-error --max-time 120 \
-              "${RENDER_URL}/api/trigger?id=${ID}" 2>&1; then
+              "${RENDER_URL%/}/api/trigger?id=${ID}" 2>&1; then
               echo ""
               echo ">>> OK"
               OK=$((OK + 1))
