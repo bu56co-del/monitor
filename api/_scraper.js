@@ -151,29 +151,49 @@ async function ensureOsLibsExtracted() {
   process.env.LD_LIBRARY_PATH = parts.join(':');
 }
 
+// Extra chromium flags for low-memory serverless runtimes. @sparticuz/chromium
+// already sets most of the common ones; these are the ones observed to
+// stabilise a long-running page evaluation on Vercel Fluid Compute.
+const EXTRA_CHROMIUM_ARGS = [
+  '--hide-scrollbars',
+  '--disable-web-security',
+  '--single-process',
+  '--no-zygote',
+  '--disable-gpu',
+  '--disable-software-rasterizer',
+  '--disable-dev-shm-usage',
+  '--disable-features=VizDisplayCompositor,IsolateOrigins,site-per-process',
+];
+
 async function launchBrowser() {
   try {
     await ensureOsLibsExtracted();
-    // Drop swiftshader — saves memory and one fewer GL stack to fail on.
     chromium.setGraphicsMode = false;
     const execPath = await chromium.executablePath();
     const stderr = [];
+    const events = [];
     const browser = await puppeteer.launch({
-      args: [...chromium.args, '--hide-scrollbars', '--disable-web-security'],
+      args: [...chromium.args, ...EXTRA_CHROMIUM_ARGS],
       defaultViewport: { width: 1280, height: 900 },
       executablePath: execPath,
       headless: chromium.headless,
       ignoreHTTPSErrors: true,
+      protocolTimeout: 120000,
     });
-    // If chromium crashes during newPage / nav, capture its stderr on the
-    // process handle for the diag.
     const proc = browser.process();
-    if (proc && proc.stderr) {
-      proc.stderr.on('data', (chunk) => {
-        if (stderr.length < 40) stderr.push(chunk.toString('utf8'));
+    if (proc) {
+      if (proc.stderr) {
+        proc.stderr.on('data', (chunk) => {
+          if (stderr.length < 80) stderr.push(chunk.toString('utf8'));
+        });
+      }
+      proc.on('exit', (code, signal) => {
+        events.push(`proc exit code=${code} signal=${signal}`);
       });
     }
+    browser.on('disconnected', () => events.push('browser disconnected'));
     browser.__stderrBuf = stderr;
+    browser.__events = events;
     browser.__execPath = execPath;
     return browser;
   } catch (err) {
@@ -182,6 +202,13 @@ async function launchBrowser() {
     err.message = `${err.message} | diag=${JSON.stringify(diag)}`;
     throw err;
   }
+}
+
+function annotateWithBrowserDiag(err, browser) {
+  const stderr = (browser && browser.__stderrBuf) ? browser.__stderrBuf.join('').slice(-2000) : '';
+  const events = (browser && browser.__events) ? browser.__events.slice(-10) : [];
+  err.message = `${err.message} | events=${JSON.stringify(events)} | chromium stderr: ${stderr || '(empty)'}`;
+  return err;
 }
 
 // Extracts "~N results" (or variants) from rendered page text.
@@ -215,14 +242,7 @@ async function scrapeTarget(pageId, { browser } = {}) {
   let b = browser;
   try {
     if (ownBrowser) b = await launchBrowser();
-    let page;
-    try {
-      page = await b.newPage();
-    } catch (e) {
-      const stderr = (b && b.__stderrBuf) ? b.__stderrBuf.join('').slice(-2000) : '';
-      e.message = `${e.message} | chromium stderr: ${stderr || '(empty)'}`;
-      throw e;
-    }
+    const page = await b.newPage();
     await page.setUserAgent(USER_AGENT);
     await page.setExtraHTTPHeaders({
       'Accept-Language': 'en-US,en;q=0.9,zh-HK;q=0.8,zh;q=0.7',
@@ -263,6 +283,8 @@ async function scrapeTarget(pageId, { browser } = {}) {
 
     await page.close();
     return { count, url, tookMs: Date.now() - startedAt };
+  } catch (err) {
+    throw annotateWithBrowserDiag(err, b);
   } finally {
     if (ownBrowser && b) {
       try { await b.close(); } catch { /* ignore */ }
