@@ -97,7 +97,7 @@ async function runBatch(targets, reason) {
   try {
     browser = await launchBrowser();
   } catch (err) {
-    logError({ stage: 'browser_launch', error: err.message });
+    await logError({ stage: 'browser_launch', error: err.message });
     cronLock = false;
     throw err;
   }
@@ -108,13 +108,13 @@ async function runBatch(targets, reason) {
       const startedAt = Date.now();
       try {
         const { count, tookMs } = await scrapeTarget(target.id, { browser });
-        upsertHistory(target.id, { date, count, fetched_at_utc: nowIsoUtc() });
+        await upsertHistory(target.id, { date, count, fetched_at_utc: nowIsoUtc() });
         results.push({ id: target.id, name: target.name, count, tookMs, ok: true });
         console.log(`  [${target.name}] count=${count} (${tookMs}ms)`);
       } catch (err) {
         const msg = err.message || String(err);
         console.error(`  [${target.name}] FAILED:`, msg);
-        logError({
+        await logError({
           page_id: target.id,
           name: target.name,
           stage: 'scrape',
@@ -137,17 +137,20 @@ async function runBatch(targets, reason) {
 const app = express();
 app.use(express.static(path.join(__dirname, 'public')));
 
-app.get('/api/data', (req, res) => {
+app.get('/api/data', async (req, res) => {
   try {
-    const rows = TARGETS.map((t) => {
-      const history = getHistory(t.id);
-      const diffSet = computeDiffs(history);
-      return { id: t.id, name: t.name, ...diffSet };
-    });
+    const rows = await Promise.all(
+      TARGETS.map(async (t) => {
+        const history = await getHistory(t.id);
+        const diffSet = computeDiffs(history);
+        return { id: t.id, name: t.name, ...diffSet };
+      }),
+    );
+    const errors = await getErrors();
     res.setHeader('Cache-Control', 'no-store');
     res.json({
       targets: rows,
-      errors: getErrors().slice(0, 50),
+      errors: errors.slice(0, 50),
       generated_at: new Date().toISOString(),
     });
   } catch (err) {
@@ -164,11 +167,11 @@ app.post('/api/trigger', async (req, res) => {
   const startedAt = Date.now();
   try {
     const { count, tookMs, url } = await scrapeTarget(target.id);
-    upsertHistory(target.id, { date: todayHKT(), count, fetched_at_utc: nowIsoUtc() });
+    await upsertHistory(target.id, { date: todayHKT(), count, fetched_at_utc: nowIsoUtc() });
     res.json({ id: target.id, name: target.name, count, url, tookMs, date: todayHKT() });
   } catch (err) {
     const msg = err.message || String(err);
-    logError({
+    await logError({
       page_id: target.id,
       name: target.name,
       stage: 'manual_trigger',
