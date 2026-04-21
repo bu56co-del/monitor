@@ -72,6 +72,29 @@ function findFileRecursive(root, fileName, maxDepth = 6) {
   return null;
 }
 
+function findDirsContainingSo(root, maxDepth = 6) {
+  const result = new Set();
+  const stack = [[root, 0]];
+  while (stack.length) {
+    const [dir, depth] = stack.pop();
+    if (depth > maxDepth) continue;
+    let entries;
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    let hasSo = false;
+    for (const e of entries) {
+      const full = path.join(dir, e.name);
+      if (e.isDirectory()) stack.push([full, depth + 1]);
+      else if (e.isFile() && /\.so(\.\d+)?$/.test(e.name)) hasSo = true;
+    }
+    if (hasSo) result.add(dir);
+  }
+  return [...result];
+}
+
 // @sparticuz/chromium picks al2 vs al2023 by sniffing /etc/os-release. On
 // Vercel's Fluid Compute runtime that sniff comes up empty so NEITHER OS
 // tarball gets inflated and chromium then fails to dlopen libnss3. Force
@@ -81,11 +104,10 @@ function findFileRecursive(root, fileName, maxDepth = 6) {
 async function ensureOsLibsExtracted() {
   const preExisting = findFileRecursive('/tmp', 'libnss3.so');
   if (preExisting) {
-    const libDir = path.dirname(preExisting);
+    const libDirs = findDirsContainingSo('/tmp');
     const parts = (process.env.LD_LIBRARY_PATH || '').split(':').filter(Boolean);
-    if (!parts.includes(libDir)) {
-      process.env.LD_LIBRARY_PATH = [libDir, ...parts].join(':');
-    }
+    for (const d of libDirs) if (!parts.includes(d)) parts.unshift(d);
+    process.env.LD_LIBRARY_PATH = parts.join(':');
     return;
   }
 
@@ -123,25 +145,40 @@ async function ensureOsLibsExtracted() {
     );
   }
 
-  const libDir = path.dirname(libnss3Path);
+  const libDirs = findDirsContainingSo('/tmp');
   const parts = (process.env.LD_LIBRARY_PATH || '').split(':').filter(Boolean);
-  if (!parts.includes(libDir)) {
-    process.env.LD_LIBRARY_PATH = [libDir, ...parts].join(':');
-  }
+  for (const d of libDirs) if (!parts.includes(d)) parts.unshift(d);
+  process.env.LD_LIBRARY_PATH = parts.join(':');
 }
 
 async function launchBrowser() {
   try {
     await ensureOsLibsExtracted();
-    return await puppeteer.launch({
+    // Drop swiftshader — saves memory and one fewer GL stack to fail on.
+    chromium.setGraphicsMode = false;
+    const execPath = await chromium.executablePath();
+    const stderr = [];
+    const browser = await puppeteer.launch({
       args: [...chromium.args, '--hide-scrollbars', '--disable-web-security'],
       defaultViewport: { width: 1280, height: 900 },
-      executablePath: await chromium.executablePath(),
+      executablePath: execPath,
       headless: chromium.headless,
       ignoreHTTPSErrors: true,
     });
+    // If chromium crashes during newPage / nav, capture its stderr on the
+    // process handle for the diag.
+    const proc = browser.process();
+    if (proc && proc.stderr) {
+      proc.stderr.on('data', (chunk) => {
+        if (stderr.length < 40) stderr.push(chunk.toString('utf8'));
+      });
+    }
+    browser.__stderrBuf = stderr;
+    browser.__execPath = execPath;
+    return browser;
   } catch (err) {
     const diag = chromiumDiagnostics();
+    diag.ldPath = process.env.LD_LIBRARY_PATH;
     err.message = `${err.message} | diag=${JSON.stringify(diag)}`;
     throw err;
   }
@@ -178,7 +215,14 @@ async function scrapeTarget(pageId, { browser } = {}) {
   let b = browser;
   try {
     if (ownBrowser) b = await launchBrowser();
-    const page = await b.newPage();
+    let page;
+    try {
+      page = await b.newPage();
+    } catch (e) {
+      const stderr = (b && b.__stderrBuf) ? b.__stderrBuf.join('').slice(-2000) : '';
+      e.message = `${e.message} | chromium stderr: ${stderr || '(empty)'}`;
+      throw e;
+    }
     await page.setUserAgent(USER_AGENT);
     await page.setExtraHTTPHeaders({
       'Accept-Language': 'en-US,en;q=0.9,zh-HK;q=0.8,zh;q=0.7',
