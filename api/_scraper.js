@@ -151,10 +151,11 @@ async function ensureOsLibsExtracted() {
   process.env.LD_LIBRARY_PATH = parts.join(':');
 }
 
-// NB: --single-process + --no-zygote were tried but caused chromium to hit
-// a NOTREACHED assertion in remote_font_face_source.cc as soon as FB's CSS
-// triggered an @font-face local() lookup (that path requires IPC to the
-// font service). Multi-process with --disable-remote-fonts is stable.
+// Serverless needs --single-process (no zygote / no sandbox) to work.
+// But FB's CSS triggers @font-face src: local() and chromium NOTREACHEDs
+// in remote_font_face_source.cc when font-unique-name lookup runs without
+// IPC. Disabling FontSrcLocalMatching short-circuits that path so the
+// assertion never fires.
 const EXTRA_CHROMIUM_ARGS = [
   '--hide-scrollbars',
   '--disable-web-security',
@@ -162,7 +163,7 @@ const EXTRA_CHROMIUM_ARGS = [
   '--disable-software-rasterizer',
   '--disable-dev-shm-usage',
   '--disable-remote-fonts',
-  '--disable-features=VizDisplayCompositor,IsolateOrigins,site-per-process',
+  '--disable-features=VizDisplayCompositor,IsolateOrigins,site-per-process,FontSrcLocalMatching',
 ];
 
 async function launchBrowser() {
@@ -172,14 +173,8 @@ async function launchBrowser() {
     const execPath = await chromium.executablePath();
     const stderr = [];
     const events = [];
-    // @sparticuz/chromium's default args already include --single-process and
-    // --no-zygote, which are fatal on pages that use @font-face src: local()
-    // (chromium NOTREACHEDs in remote_font_face_source.cc). Strip them.
-    const baseArgs = chromium.args.filter(
-      (a) => a !== '--single-process' && a !== '--no-zygote',
-    );
     const browser = await puppeteer.launch({
-      args: [...baseArgs, ...EXTRA_CHROMIUM_ARGS],
+      args: [...chromium.args, ...EXTRA_CHROMIUM_ARGS],
       defaultViewport: { width: 1280, height: 900 },
       executablePath: execPath,
       headless: chromium.headless,
