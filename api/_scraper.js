@@ -52,13 +52,42 @@ function chromiumDiagnostics() {
   return { cwd: process.cwd(), bin: resolved, tmp: safeLs('/tmp') };
 }
 
+function findFileRecursive(root, fileName, maxDepth = 6) {
+  const stack = [[root, 0]];
+  while (stack.length) {
+    const [dir, depth] = stack.pop();
+    if (depth > maxDepth) continue;
+    let entries;
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const e of entries) {
+      const full = path.join(dir, e.name);
+      if (e.isDirectory()) stack.push([full, depth + 1]);
+      else if (e.name === fileName) return full;
+    }
+  }
+  return null;
+}
+
 // @sparticuz/chromium picks al2 vs al2023 by sniffing /etc/os-release. On
 // Vercel's Fluid Compute runtime that sniff comes up empty so NEITHER OS
 // tarball gets inflated and chromium then fails to dlopen libnss3. Force
-// the extraction ourselves via a pure-JS pipeline (brotli → tar) straight
-// into /tmp — no system `tar` binary needed. Idempotent.
+// the extraction ourselves via a pure-JS pipeline (brotli → tar) into /tmp.
+// The archive may place libs under a nested dir, so after extraction we
+// walk /tmp to locate libnss3.so and point LD_LIBRARY_PATH at its dir.
 async function ensureOsLibsExtracted() {
-  if (fs.existsSync('/tmp/libnss3.so')) return;
+  const preExisting = findFileRecursive('/tmp', 'libnss3.so');
+  if (preExisting) {
+    const libDir = path.dirname(preExisting);
+    const parts = (process.env.LD_LIBRARY_PATH || '').split(':').filter(Boolean);
+    if (!parts.includes(libDir)) {
+      process.env.LD_LIBRARY_PATH = [libDir, ...parts].join(':');
+    }
+    return;
+  }
 
   const pkgRoot = path.dirname(require.resolve('@sparticuz/chromium/package.json'));
   const brTars = ['al2023.tar.br', 'al2.tar.br']
@@ -70,6 +99,7 @@ async function ensureOsLibsExtracted() {
   }
 
   const errors = [];
+  let libnss3Path = null;
   for (const brPath of brTars) {
     try {
       await pipeline(
@@ -81,16 +111,22 @@ async function ensureOsLibsExtracted() {
       errors.push(`${path.basename(brPath)}: ${e.message}`);
       continue;
     }
-    if (fs.existsSync('/tmp/libnss3.so')) break;
+    libnss3Path = findFileRecursive('/tmp', 'libnss3.so');
+    if (libnss3Path) break;
   }
 
-  if (!fs.existsSync('/tmp/libnss3.so')) {
-    throw new Error(`Manual inflate did not produce /tmp/libnss3.so. Errors: ${errors.join(' | ') || '(none)'}`);
+  if (!libnss3Path) {
+    const tmpDump = safeLs('/tmp');
+    throw new Error(
+      `Inflate did not produce libnss3.so. Errors: ${errors.join(' | ') || '(none)'}. ` +
+      `/tmp after extract: ${JSON.stringify(tmpDump)}`,
+    );
   }
 
+  const libDir = path.dirname(libnss3Path);
   const parts = (process.env.LD_LIBRARY_PATH || '').split(':').filter(Boolean);
-  if (!parts.includes('/tmp')) {
-    process.env.LD_LIBRARY_PATH = ['/tmp', ...parts].join(':');
+  if (!parts.includes(libDir)) {
+    process.env.LD_LIBRARY_PATH = [libDir, ...parts].join(':');
   }
 }
 
