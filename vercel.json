@@ -3,8 +3,14 @@
     { "path": "/api/cron", "schedule": "0 17 * * *" }
   ],
   "functions": {
-    "api/cron.js":    { "maxDuration": 300 },
-    "api/trigger.js": { "maxDuration": 60  },
-    "api/data.js":    { "maxDuration": 10  }
+    "api/cron.js": {
+      "maxDuration": 300,
+      "includeFiles": "node_modules/@sparticuz/chromium/**"
+    },
+    "api/trigger.js": {
+      "maxDuration": 60,
+      "includeFiles": "node_modules/@sparticuz/chromium/**"
+    },
+    "api/data.js": { "maxDuration": 10 }
   }
 }
