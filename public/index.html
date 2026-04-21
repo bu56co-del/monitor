@@ -200,6 +200,12 @@
     const [y, m, day] = d.split('-');
     return `${day}/${m}/${y.slice(2)}`;
   };
+  const fmtTime = (iso) => {
+    if (!iso) return '';
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return '';
+    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  };
 
   function fmtDiffCell(d) {
     if (!d || d.diff === null || d.diff === undefined) {
@@ -216,9 +222,10 @@
   function renderRow(t) {
     const diffsByLabel = Object.fromEntries((t.diffs || []).map((d) => [d.label, d]));
     const adLib = `https://www.facebook.com/ads/library/?active_status=active&ad_type=all&country=HK&view_all_page_id=${t.id}`;
+    const updatedAt = fmtTime(t.current && t.current.fetched_at_utc);
     const current = t.current
       ? `<div class="count-big">${fmtNum(t.current.count)}</div>
-         <div class="count-date">${fmtDate(t.current.date)}</div>`
+         <div class="count-date">${fmtDate(t.current.date)}${updatedAt ? ` · ${updatedAt}` : ''}</div>`
       : `<div class="diff-na">no data</div>`;
     return `
       <tr data-id="${t.id}">
