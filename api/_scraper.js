@@ -151,17 +151,17 @@ async function ensureOsLibsExtracted() {
   process.env.LD_LIBRARY_PATH = parts.join(':');
 }
 
-// Extra chromium flags for low-memory serverless runtimes. @sparticuz/chromium
-// already sets most of the common ones; these are the ones observed to
-// stabilise a long-running page evaluation on Vercel Fluid Compute.
+// NB: --single-process + --no-zygote were tried but caused chromium to hit
+// a NOTREACHED assertion in remote_font_face_source.cc as soon as FB's CSS
+// triggered an @font-face local() lookup (that path requires IPC to the
+// font service). Multi-process with --disable-remote-fonts is stable.
 const EXTRA_CHROMIUM_ARGS = [
   '--hide-scrollbars',
   '--disable-web-security',
-  '--single-process',
-  '--no-zygote',
   '--disable-gpu',
   '--disable-software-rasterizer',
   '--disable-dev-shm-usage',
+  '--disable-remote-fonts',
   '--disable-features=VizDisplayCompositor,IsolateOrigins,site-per-process',
 ];
 
