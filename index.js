@@ -1,5 +1,6 @@
 const express = require('express');
 const path = require('path');
+const os = require('os');
 const cron = require('node-cron');
 
 const TARGETS = require('./lib/targets');
@@ -9,11 +10,11 @@ const { getHistory, upsertHistory, getErrors, logError } = require('./lib/storag
 const PORT = Number(process.env.PORT) || 3000;
 const TZ = 'Asia/Hong_Kong';
 
-// Cron: HKT 09:00-18:00, once every hour. 16 targets spread across 10 slots,
-// each target scraped once per day. Run `node index.js` and keep the process
-// alive (pm2, launchd, or just a terminal tab).
+// Cron: HKT 09:30-17:30, every hour at :30. Targets are spread across 9 slots
+// (hours 9..17 inclusive), each target scraped once per day. Run
+// `node index.js` and keep the process alive (pm2, launchd, or a terminal tab).
 const FIRST_HOUR = 9;
-const WINDOW_HOURS = 10; // 9,10,11,12,13,14,15,16,17,18 → 10 slots
+const WINDOW_HOURS = 9; // 9,10,11,12,13,14,15,16,17 → 9 slots at xx:30
 
 const WINDOWS = [
   { label: 'Daily',     days: 1   },
@@ -199,14 +200,31 @@ app.get('/api/cron', async (req, res) => {
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`FB Ads Monitor listening on http://localhost:${PORT}`);
-  console.log(`Timezone: ${TZ}, window: ${FIRST_HOUR}:00-${FIRST_HOUR + WINDOW_HOURS - 1}:59`);
+function lanIPs() {
+  const ips = [];
+  const nets = os.networkInterfaces();
+  for (const name of Object.keys(nets)) {
+    for (const ni of nets[name] || []) {
+      if (ni.family === 'IPv4' && !ni.internal) ips.push(ni.address);
+    }
+  }
+  return ips;
+}
+
+// Bind explicitly to 0.0.0.0 so LAN clients (colleagues on the same office
+// WiFi) can reach the dashboard at http://<this-mac's-LAN-ip>:3000.
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`FB Ads Monitor listening on:`);
+  console.log(`  http://localhost:${PORT}       (this machine)`);
+  for (const ip of lanIPs()) {
+    console.log(`  http://${ip}:${PORT}  (share with LAN)`);
+  }
+  console.log(`Timezone: ${TZ}, window: ${FIRST_HOUR}:30-${FIRST_HOUR + WINDOW_HOURS - 1}:30`);
 });
 
-// --- Schedule: every hour on the hour, HKT 09:00-18:00 -----------------
+// --- Schedule: every hour at :30, HKT 09:30-17:30 ----------------------
 
-cron.schedule('0 9-18 * * *', async () => {
+cron.schedule('30 9-17 * * *', async () => {
   const hkHour = Number(
     new Intl.DateTimeFormat('en-GB', { hour: '2-digit', hour12: false, timeZone: TZ })
       .formatToParts(new Date())
@@ -214,14 +232,14 @@ cron.schedule('0 9-18 * * *', async () => {
   );
   const batch = pickTargetsForHour(hkHour);
   if (batch.length === 0) {
-    console.log(`[cron] HKT ${hkHour}: no targets for this slot`);
+    console.log(`[cron] HKT ${hkHour}:30 no targets for this slot`);
     return;
   }
   try {
-    await runBatch(batch, `HKT ${hkHour}:00`);
+    await runBatch(batch, `HKT ${hkHour}:30`);
   } catch (err) {
-    console.error(`[cron] HKT ${hkHour}:00 failed:`, err.message);
+    console.error(`[cron] HKT ${hkHour}:30 failed:`, err.message);
   }
 }, { timezone: TZ });
 
-console.log(`[cron] scheduled: 0 9-18 * * * (${TZ})`);
+console.log(`[cron] scheduled: 30 9-17 * * * (${TZ})`);
