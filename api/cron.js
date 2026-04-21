@@ -1,74 +1,38 @@
-const { Redis } = require('@upstash/redis');
+const TARGETS = require('./_targets');
+const { getKv, isKvConfigured, upsertHistory, logError } = require('./_kv');
+const { launchBrowser, scrapeTarget } = require('./_scraper');
 
-const KV_URL = process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL;
-const KV_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN;
+// Cron runs hourly from 17:00 to 23:00 UTC (HKT 01:00-07:00, a 7-hour window).
+// Each run scrapes the subset of targets whose index % 7 equals this hour's
+// offset from 17. With N targets, each target is scraped exactly once per day.
+const FIRST_HOUR = 17;
+const WINDOW_HOURS = 7;
 
-const PAGE_ID = '110379081699089';
-const COUNTRY = 'HK';
-const GRAPH_VERSION = 'v21.0';
-const MAX_PAGES = 50;
-const PAGE_SIZE = 500;
+function hourOffset(now = new Date()) {
+  const h = now.getUTCHours();
+  const offset = h - FIRST_HOUR;
+  if (offset < 0 || offset >= WINDOW_HOURS) return null;
+  return offset;
+}
+
+function pickTargets(targets, offset) {
+  return targets.filter((_, i) => i % WINDOW_HOURS === offset);
+}
+
+function utcToday() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function fetchedAtUtc() {
+  return new Date().toISOString().replace(/\.\d+Z$/, 'Z');
+}
 
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-function redact(str, token) {
-  return token ? str.replace(token, '***REDACTED***') : str;
-}
-
-async function fetchPage(url, token) {
-  const delays = [0, 2000, 4000, 8000];
-  let lastErr;
-  for (const delay of delays) {
-    if (delay) await sleep(delay);
-    let res;
-    try {
-      res = await fetch(url, { signal: AbortSignal.timeout(30_000) });
-    } catch (e) {
-      lastErr = e;
-      console.error('Network error:', e.message);
-      continue;
-    }
-    if (res.ok) return res.json();
-    if (res.status === 429 || res.status >= 500) {
-      lastErr = new Error(`HTTP ${res.status}`);
-      console.error(`HTTP ${res.status}, will retry`);
-      continue;
-    }
-    const body = await res.json().catch(() => ({}));
-    throw new Error(redact(`HTTP ${res.status}: ${JSON.stringify(body)}`, token));
-  }
-  throw new Error(`All retries exhausted: ${lastErr?.message}`);
-}
-
-async function fetchCount(token) {
-  const params = new URLSearchParams({
-    search_page_ids: PAGE_ID,
-    ad_active_status: 'ACTIVE',
-    ad_reached_countries: JSON.stringify([COUNTRY]),
-    ad_type: 'ALL',
-    fields: 'id',
-    limit: String(PAGE_SIZE),
-    access_token: token,
-  });
-
-  let url = `https://graph.facebook.com/${GRAPH_VERSION}/ads_archive?${params}`;
-  let total = 0;
-
-  for (let page = 0; page < MAX_PAGES; page++) {
-    const data = await fetchPage(url, token);
-    const batch = data.data ?? [];
-    total += batch.length;
-    const next = data.paging?.next;
-    if (!next || batch.length === 0) return total;
-    url = next;
-  }
-  throw new Error(`Reached MAX_PAGES (${MAX_PAGES}) ceiling without exhausting results`);
-}
-
-function utcToday() {
-  return new Date().toISOString().slice(0, 10);
+function jitter(minMs, maxMs) {
+  return Math.floor(minMs + Math.random() * (maxMs - minMs));
 }
 
 module.exports = async function handler(req, res) {
@@ -77,54 +41,92 @@ module.exports = async function handler(req, res) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
 
-  if (!KV_URL || !KV_TOKEN) {
+  if (!isKvConfigured()) {
     return res.status(500).json({
       stage: 'config',
       error: 'KV not configured',
-      detail: 'Missing UPSTASH_REDIS_REST_URL / UPSTASH_REDIS_REST_TOKEN (or KV_REST_API_URL / KV_REST_API_TOKEN).',
+      detail: 'Missing UPSTASH_REDIS_REST_URL / UPSTASH_REDIS_REST_TOKEN.',
     });
   }
 
-  const token = process.env.FB_ACCESS_TOKEN?.trim();
-  if (!token) {
-    return res.status(500).json({
-      stage: 'config',
-      error: 'FB_ACCESS_TOKEN environment variable is not set',
+  // Allow manual GET/POST with `?force=1` to scrape the whole list even
+  // outside the cron window — handy for first-time seeding.
+  const force = req.query?.force === '1' || req.url?.includes('force=1');
+  const offset = hourOffset();
+  let batch;
+  if (force) {
+    batch = TARGETS;
+  } else if (offset === null) {
+    return res.status(200).json({
+      skipped: true,
+      reason: `Outside cron window (UTC ${FIRST_HOUR}:00-${FIRST_HOUR + WINDOW_HOURS - 1}:59)`,
     });
+  } else {
+    batch = pickTargets(TARGETS, offset);
   }
 
-  let count;
+  if (batch.length === 0) {
+    return res.status(200).json({ skipped: true, reason: 'No targets for this hour' });
+  }
+
+  const kv = getKv();
+  const date = utcToday();
+  const results = [];
+
+  // Share one browser across the batch to amortise cold-start cost.
+  let browser;
   try {
-    count = await fetchCount(token);
+    browser = await launchBrowser();
   } catch (err) {
-    const msg = redact(err.message, process.env.FB_ACCESS_TOKEN);
-    console.error('FB fetch failed:', msg);
-    return res.status(500).json({ stage: 'fb_fetch', error: msg });
+    await logError(kv, {
+      stage: 'browser_launch',
+      error: err.message,
+    }).catch(() => {});
+    return res.status(500).json({ stage: 'browser_launch', error: err.message });
   }
 
   try {
-    const kv = new Redis({ url: KV_URL, token: KV_TOKEN });
-    const date = utcToday();
-    const fetched_at_utc = new Date().toISOString().replace(/\.\d+Z$/, 'Z');
+    for (let i = 0; i < batch.length; i++) {
+      const target = batch[i];
+      const startedAt = Date.now();
+      try {
+        const { count, tookMs } = await scrapeTarget(target.id, { browser });
+        await upsertHistory(kv, target.id, {
+          date,
+          count,
+          fetched_at_utc: fetchedAtUtc(),
+        });
+        results.push({ id: target.id, name: target.name, count, tookMs, ok: true });
+        console.log(`[${target.name}] count=${count} (${tookMs}ms)`);
+      } catch (err) {
+        const msg = err.message || String(err);
+        console.error(`[${target.name}] FAILED:`, msg);
+        await logError(kv, {
+          page_id: target.id,
+          name: target.name,
+          stage: 'scrape',
+          error: msg,
+          took_ms: Date.now() - startedAt,
+        }).catch(() => {});
+        results.push({ id: target.id, name: target.name, ok: false, error: msg });
+      }
 
-    let history = (await kv.get('history')) ?? [];
-    if (typeof history === 'string') {
-      try { history = JSON.parse(history); } catch { history = []; }
+      // Randomised delay between targets to avoid looking like a burst.
+      if (i < batch.length - 1) await sleep(jitter(5000, 15000));
     }
-    if (!Array.isArray(history)) history = [];
-
-    const updated = history
-      .filter((r) => r.date !== date)
-      .concat({ date, count, fetched_at_utc })
-      .sort((a, b) => a.date.localeCompare(b.date));
-
-    await kv.set('history', updated);
-
-    console.log(`Stored count=${count} for ${date} (${updated.length} total rows)`);
-    return res.status(200).json({ date, count, total_rows: updated.length });
-  } catch (err) {
-    const msg = redact(err.message, process.env.FB_ACCESS_TOKEN);
-    console.error('KV write failed:', msg);
-    return res.status(500).json({ stage: 'kv_write', error: msg, fetched_count: count });
+  } finally {
+    try { await browser.close(); } catch { /* ignore */ }
   }
+
+  const ok = results.filter((r) => r.ok).length;
+  const failed = results.length - ok;
+  return res.status(failed > 0 ? 207 : 200).json({
+    date,
+    offset,
+    window: `UTC ${FIRST_HOUR}:00-${FIRST_HOUR + WINDOW_HOURS - 1}:59`,
+    scraped: results.length,
+    ok,
+    failed,
+    results,
+  });
 };
