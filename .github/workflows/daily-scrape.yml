@@ -54,7 +54,7 @@ jobs:
             echo "=== [$NAME] (ID: $ID) ==="
 
             # 2 minute timeout per target — skip if stuck
-            if curl --fail --show-error --max-time 120 \
+            if curl -X POST --fail --show-error --max-time 120 \
               "${RENDER_URL}/api/trigger?id=${ID}" 2>&1; then
               echo ""
               echo ">>> OK"
