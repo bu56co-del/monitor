@@ -12,19 +12,16 @@
       background: #0d0d0d;
       color: #e8e8e8;
       min-height: 100vh;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
       padding: 2rem 1rem 4rem;
     }
 
+    .wrap { max-width: 1100px; margin: 0 auto; }
+
     header {
-      width: 100%;
-      max-width: 640px;
       display: flex;
       justify-content: space-between;
       align-items: center;
-      margin-bottom: 2.5rem;
+      margin-bottom: 2rem;
     }
 
     .brand {
@@ -35,195 +32,313 @@
       color: #888;
     }
 
-    button#refresh {
+    button {
       background: none;
       border: 1px solid #333;
       color: #aaa;
-      font-size: 0.8rem;
-      padding: 0.35rem 0.9rem;
+      font-size: 0.78rem;
+      padding: 0.35rem 0.85rem;
       border-radius: 6px;
       cursor: pointer;
-      transition: border-color 0.15s, color 0.15s;
+      transition: border-color 0.15s, color 0.15s, background 0.15s;
+      font-family: inherit;
     }
-    button#refresh:hover { border-color: #666; color: #eee; }
-    button#refresh:disabled { opacity: 0.4; cursor: default; }
+    button:hover { border-color: #666; color: #eee; }
+    button:disabled { opacity: 0.4; cursor: default; }
+    button.primary { border-color: #4a5; color: #cfd; }
+    button.primary:hover { background: #1a2a1a; }
 
     .card {
-      width: 100%;
-      max-width: 640px;
       background: #161616;
       border: 1px solid #222;
-      border-radius: 16px;
-      padding: 2rem;
+      border-radius: 14px;
+      padding: 1.5rem;
       margin-bottom: 1rem;
     }
-
-    .count-label {
-      font-size: 0.75rem;
+    .card h2 {
+      font-size: 0.72rem;
       font-weight: 600;
       letter-spacing: 0.1em;
       text-transform: uppercase;
       color: #666;
-      margin-bottom: 0.5rem;
+      margin-bottom: 1rem;
     }
-
-    .count-value {
-      font-size: 4.5rem;
-      font-weight: 700;
-      line-height: 1;
-      color: #fff;
-      letter-spacing: -2px;
-    }
-
-    .count-meta {
-      margin-top: 0.6rem;
-      font-size: 0.8rem;
-      color: #555;
-    }
-    .count-meta a { color: #555; text-decoration: none; border-bottom: 1px solid #333; }
-    .count-meta a:hover { color: #999; }
 
     table {
       width: 100%;
       border-collapse: collapse;
-      font-size: 0.9rem;
+      font-size: 0.88rem;
     }
-
     th {
       text-align: left;
-      font-size: 0.7rem;
+      font-size: 0.68rem;
       font-weight: 600;
       letter-spacing: 0.08em;
       text-transform: uppercase;
       color: #555;
-      padding: 0 0 0.75rem;
+      padding: 0 0.5rem 0.75rem;
       border-bottom: 1px solid #222;
+      white-space: nowrap;
     }
-    th:not(:first-child) { text-align: right; }
-
+    th.num, td.num { text-align: right; }
     td {
-      padding: 0.75rem 0;
+      padding: 0.75rem 0.5rem;
       border-bottom: 1px solid #1a1a1a;
       color: #bbb;
+      vertical-align: middle;
     }
-    td:not(:first-child) { text-align: right; }
     tr:last-child td { border-bottom: none; }
+    tr:hover td { background: #181818; }
 
-    .window-label { color: #e8e8e8; font-weight: 500; }
+    .target-name { color: #e8e8e8; font-weight: 500; }
+    .target-id   { color: #555; font-size: 0.72rem; font-family: ui-monospace, monospace; }
+
+    .count-big { font-size: 1.1rem; font-weight: 600; color: #fff; }
+    .count-date { color: #555; font-size: 0.72rem; }
 
     .diff-up   { color: #4ade80; font-weight: 600; }
     .diff-down { color: #f87171; font-weight: 600; }
     .diff-zero { color: #666; }
-    .diff-na   { color: #444; font-style: italic; }
+    .diff-na   { color: #333; font-style: italic; }
+
+    td.actions { width: 1%; white-space: nowrap; text-align: right; }
 
     .skeleton {
       display: inline-block;
       background: #222;
       border-radius: 4px;
       animation: pulse 1.4s ease-in-out infinite;
+      width: 50px; height: 0.9rem;
     }
-    @keyframes pulse {
-      0%, 100% { opacity: 1; }
-      50%       { opacity: 0.4; }
-    }
+    @keyframes pulse { 0%,100% {opacity:1;} 50% {opacity:0.4;} }
 
-    .error-msg {
-      color: #f87171;
-      font-size: 0.85rem;
-      text-align: center;
-      padding: 1rem 0;
+    details.errors summary {
+      cursor: pointer;
+      user-select: none;
+      list-style: none;
+      color: #888;
+      font-size: 0.78rem;
     }
+    details.errors summary::-webkit-details-marker { display: none; }
+    details.errors[open] summary { margin-bottom: 0.75rem; color: #ccc; }
+    .err-row {
+      padding: 0.6rem 0;
+      border-bottom: 1px solid #1a1a1a;
+      font-size: 0.8rem;
+      font-family: ui-monospace, monospace;
+    }
+    .err-row:last-child { border-bottom: none; }
+    .err-meta { color: #666; font-size: 0.72rem; margin-bottom: 0.25rem; }
+    .err-msg  { color: #f87171; word-break: break-word; white-space: pre-wrap; }
+
+    .flash { color: #4ade80; font-size: 0.75rem; margin-left: 0.5rem; }
+    .flash.err { color: #f87171; }
 
     footer {
       margin-top: 2rem;
       font-size: 0.72rem;
       color: #333;
       text-align: center;
-      line-height: 1.6;
+      line-height: 1.7;
     }
+    footer a { color: #555; }
   </style>
 </head>
 <body>
+<div class="wrap">
 
 <header>
   <span class="brand">FB Ads Monitor</span>
-  <button id="refresh">↻ Refresh</button>
+  <div>
+    <button id="force-all" title="Scrape all targets now (ignores schedule)">⚡ Force run all</button>
+    <button id="refresh">↻ Refresh</button>
+  </div>
 </header>
 
-<div class="card" id="count-card">
-  <div class="count-label">Active Ads (HK)</div>
-  <div class="count-value" id="count-val"><span class="skeleton" style="width:120px;height:4rem;display:inline-block"></span></div>
-  <div class="count-meta" id="count-meta">&nbsp;</div>
-</div>
-
-<div class="card" id="diff-card">
+<div class="card">
+  <h2>Active ads (HK) per target</h2>
   <table>
     <thead>
       <tr>
-        <th>Period</th>
-        <th>Baseline</th>
-        <th>Change</th>
+        <th>Target</th>
+        <th class="num">Current</th>
+        <th class="num">1d</th>
+        <th class="num">7d</th>
+        <th class="num">30d</th>
+        <th class="num">90d</th>
+        <th class="num">365d</th>
+        <th></th>
       </tr>
     </thead>
-    <tbody id="diff-body">
-      <tr><td colspan="3"><span class="skeleton" style="width:100%;height:1rem;display:block;margin:0.5rem 0"></span></td></tr>
+    <tbody id="rows">
+      <tr><td colspan="8" style="text-align:center;padding:1.5rem;color:#555">Loading…</td></tr>
     </tbody>
   </table>
 </div>
 
-<footer id="footer">Auto-updated daily at 9:00 HKT &nbsp;·&nbsp; Page&nbsp;<a style="color:#333;text-decoration:none;border-bottom:1px solid #2a2a2a" href="https://www.facebook.com/ads/library/?active_status=active&ad_type=all&country=HK&view_all_page_id=110379081699089" target="_blank">110379081699089</a></footer>
+<div class="card">
+  <details class="errors" id="errors-details">
+    <summary>
+      <span id="errors-summary">Recent errors — loading…</span>
+    </summary>
+    <div id="errors-body"></div>
+  </details>
+</div>
+
+<footer>
+  Daily cron UTC 17:00-23:00 (HKT 01:00-07:00) &nbsp;·&nbsp;
+  Source: <a href="https://www.facebook.com/ads/library/" target="_blank">Meta Ad Library</a>
+  &nbsp;·&nbsp; <span id="gen-at"></span>
+</footer>
+
+</div><!-- /wrap -->
 
 <script>
-  function fmtDate(d) {
+  const fmtNum = (n) => n === null || n === undefined ? '—' : n.toLocaleString();
+  const fmtDate = (d) => {
     if (!d) return '—';
     const [y, m, day] = d.split('-');
-    return `${day}/${m}/${y}`;
+    return `${day}/${m}/${y.slice(2)}`;
+  };
+
+  function fmtDiffCell(d) {
+    if (!d || d.diff === null || d.diff === undefined) {
+      return '<span class="diff-na">—</span>';
+    }
+    const sign = d.diff > 0 ? '+' : '';
+    const pctStr = d.pct !== null && d.pct !== undefined
+      ? ` <span style="opacity:0.65">(${d.pct > 0 ? '+' : ''}${d.pct}%)</span>`
+      : '';
+    const cls = d.diff > 0 ? 'diff-up' : d.diff < 0 ? 'diff-down' : 'diff-zero';
+    return `<span class="${cls}">${sign}${d.diff}${pctStr}</span>`;
   }
 
-  function fmtDiff(diff, pct) {
-    if (diff === null) return '<span class="diff-na">n/a</span>';
-    const sign = diff > 0 ? '+' : '';
-    const pctStr = pct !== null ? ` (${pct > 0 ? '+' : ''}${pct}%)` : '';
-    const cls = diff > 0 ? 'diff-up' : diff < 0 ? 'diff-down' : 'diff-zero';
-    return `<span class="${cls}">${sign}${diff}${pctStr}</span>`;
+  function renderRow(t) {
+    const diffsByLabel = Object.fromEntries((t.diffs || []).map((d) => [d.label, d]));
+    const adLib = `https://www.facebook.com/ads/library/?active_status=active&ad_type=all&country=HK&view_all_page_id=${t.id}`;
+    const current = t.current
+      ? `<div class="count-big">${fmtNum(t.current.count)}</div>
+         <div class="count-date">${fmtDate(t.current.date)}</div>`
+      : `<div class="diff-na">no data</div>`;
+    return `
+      <tr data-id="${t.id}">
+        <td>
+          <div class="target-name">
+            <a href="${adLib}" target="_blank" style="color:inherit;text-decoration:none;border-bottom:1px dotted #333">${t.name}</a>
+          </div>
+          <div class="target-id">${t.id}</div>
+        </td>
+        <td class="num">${current}</td>
+        <td class="num">${fmtDiffCell(diffsByLabel.Daily)}</td>
+        <td class="num">${fmtDiffCell(diffsByLabel.Weekly)}</td>
+        <td class="num">${fmtDiffCell(diffsByLabel.Monthly)}</td>
+        <td class="num">${fmtDiffCell(diffsByLabel.Quarterly)}</td>
+        <td class="num">${fmtDiffCell(diffsByLabel.Yearly)}</td>
+        <td class="actions">
+          <button class="fetch-btn" data-id="${t.id}" data-name="${t.name.replace(/"/g, '&quot;')}">
+            ↻ Fetch now
+          </button>
+          <span class="flash" data-flash="${t.id}"></span>
+        </td>
+      </tr>`;
+  }
+
+  function renderErrors(errors) {
+    const summary = document.getElementById('errors-summary');
+    const body = document.getElementById('errors-body');
+    if (!errors || errors.length === 0) {
+      summary.textContent = 'Recent errors — none ✨';
+      body.innerHTML = '';
+      return;
+    }
+    summary.textContent = `Recent errors — ${errors.length}`;
+    body.innerHTML = errors.map((e) => `
+      <div class="err-row">
+        <div class="err-meta">
+          ${new Date(e.ts).toLocaleString()} ·
+          ${e.name || '(no target)'} ·
+          ${e.page_id || ''} ·
+          stage: ${e.stage || '?'}
+          ${e.took_ms ? ` · ${e.took_ms}ms` : ''}
+        </div>
+        <div class="err-msg">${(e.error || '').toString().replace(/</g, '&lt;')}</div>
+      </div>
+    `).join('');
   }
 
   async function load() {
     const btn = document.getElementById('refresh');
     btn.disabled = true;
-
     try {
-      const res = await fetch('/api/data');
+      const res = await fetch('/api/data', { cache: 'no-store' });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
-
-      if (!data.current) {
-        document.getElementById('count-val').textContent = '—';
-        document.getElementById('count-meta').textContent = 'No data yet. Trigger /api/cron to seed day 1.';
-        document.getElementById('diff-body').innerHTML = '<tr><td colspan="3" class="diff-na" style="text-align:center;padding:1rem 0">Waiting for first snapshot…</td></tr>';
-        return;
-      }
-
-      document.getElementById('count-val').textContent = data.current.count.toLocaleString();
-      document.getElementById('count-meta').innerHTML =
-        `As of ${fmtDate(data.current.date)} &nbsp;·&nbsp; ${data.total_snapshots} snapshot${data.total_snapshots !== 1 ? 's' : ''}`;
-
-      document.getElementById('diff-body').innerHTML = data.diffs.map(d => `
-        <tr>
-          <td class="window-label">${d.label}</td>
-          <td>${d.baseline_date ? `${d.baseline_count?.toLocaleString()} <span style="color:#444;font-size:0.75rem">(${fmtDate(d.baseline_date)})</span>` : '<span class="diff-na">—</span>'}</td>
-          <td>${fmtDiff(d.diff, d.pct)}</td>
-        </tr>`).join('');
-
+      document.getElementById('rows').innerHTML =
+        (data.targets || []).map(renderRow).join('') ||
+        '<tr><td colspan="8" style="text-align:center;padding:1.5rem;color:#555">No targets configured</td></tr>';
+      renderErrors(data.errors || []);
+      document.getElementById('gen-at').textContent =
+        data.generated_at ? `Updated ${new Date(data.generated_at).toLocaleTimeString()}` : '';
     } catch (e) {
-      document.getElementById('count-val').innerHTML = '<span class="error-msg">Failed to load</span>';
-      document.getElementById('diff-body').innerHTML = `<tr><td colspan="3" class="error-msg">${e.message}</td></tr>`;
+      document.getElementById('rows').innerHTML =
+        `<tr><td colspan="8" style="text-align:center;padding:1.5rem;color:#f87171">Failed to load: ${e.message}</td></tr>`;
     } finally {
       btn.disabled = false;
     }
   }
 
+  function flash(id, msg, isErr) {
+    const el = document.querySelector(`[data-flash="${id}"]`);
+    if (!el) return;
+    el.textContent = msg;
+    el.className = 'flash' + (isErr ? ' err' : '');
+    if (!isErr) setTimeout(() => { el.textContent = ''; }, 4000);
+  }
+
+  async function fetchOne(id, name, btn) {
+    btn.disabled = true;
+    btn.textContent = '… fetching';
+    flash(id, '');
+    try {
+      const res = await fetch(`/api/trigger?id=${encodeURIComponent(id)}`, { method: 'POST' });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error || body.detail || `HTTP ${res.status}`);
+      flash(id, `✓ ${body.count} (${(body.tookMs / 1000).toFixed(1)}s)`);
+      await load();
+    } catch (e) {
+      flash(id, `✗ ${e.message}`, true);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '↻ Fetch now';
+    }
+  }
+
+  async function forceAll(btn) {
+    if (!confirm('Scrape ALL targets right now? This takes a minute or two.')) return;
+    btn.disabled = true;
+    const original = btn.textContent;
+    btn.textContent = '… running';
+    try {
+      const res = await fetch('/api/cron?force=1');
+      const body = await res.json();
+      if (res.status >= 500) throw new Error(body.error || `HTTP ${res.status}`);
+      alert(`Done.\nScraped: ${body.scraped}\nOK: ${body.ok}\nFailed: ${body.failed}`);
+      await load();
+    } catch (e) {
+      alert('Force run failed: ' + e.message);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = original;
+    }
+  }
+
   document.getElementById('refresh').addEventListener('click', load);
+  document.getElementById('force-all').addEventListener('click', (e) => forceAll(e.currentTarget));
+  document.getElementById('rows').addEventListener('click', (e) => {
+    const btn = e.target.closest('.fetch-btn');
+    if (!btn) return;
+    fetchOne(btn.dataset.id, btn.dataset.name, btn);
+  });
   load();
 </script>
 </body>
