@@ -49,8 +49,43 @@ function chromiumDiagnostics() {
   return { cwd: process.cwd(), bin: resolved, tmp: safeLs('/tmp') };
 }
 
+// @sparticuz/chromium picks al2 vs al2023 by sniffing /etc/os-release. On
+// Vercel's Fluid Compute runtime that sniff comes up empty so NEITHER OS
+// tarball gets inflated and chromium then fails to dlopen libnss3. Force
+// the extraction ourselves (idempotent — skips if the libs already exist).
+async function ensureOsLibsExtracted() {
+  if (fs.existsSync('/tmp/libnss3.so')) return;
+
+  let lambdafs;
+  try {
+    lambdafs = require('@sparticuz/lambdafs');
+  } catch (e) {
+    throw new Error(`Cannot require @sparticuz/lambdafs: ${e.message}`);
+  }
+
+  const pkgRoot = path.dirname(require.resolve('@sparticuz/chromium/package.json'));
+  const tarballs = ['al2023.tar.br', 'al2.tar.br']
+    .map((n) => path.join(pkgRoot, 'bin', n))
+    .filter((p) => fs.existsSync(p));
+
+  for (const tarball of tarballs) {
+    await lambdafs.inflate(tarball);
+    if (fs.existsSync('/tmp/libnss3.so')) break;
+  }
+
+  if (!fs.existsSync('/tmp/libnss3.so')) {
+    throw new Error('Manual inflate did not produce /tmp/libnss3.so');
+  }
+
+  const parts = (process.env.LD_LIBRARY_PATH || '').split(':').filter(Boolean);
+  if (!parts.includes('/tmp')) {
+    process.env.LD_LIBRARY_PATH = ['/tmp', ...parts].join(':');
+  }
+}
+
 async function launchBrowser() {
   try {
+    await ensureOsLibsExtracted();
     return await puppeteer.launch({
       args: [...chromium.args, '--hide-scrollbars', '--disable-web-security'],
       defaultViewport: { width: 1280, height: 900 },
