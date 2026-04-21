@@ -4,8 +4,9 @@ const os = require('os');
 const cron = require('node-cron');
 
 const TARGETS = require('./lib/targets');
-const { scrapeTarget, launchBrowser } = require('./lib/scraper');
+const { scrapeTarget } = require('./lib/scraper');
 const { getHistory, upsertHistory, getErrors, logError } = require('./lib/storage');
+const { runBatch, todayHKT, nowIsoUtc } = require('./lib/batch');
 
 const PORT = Number(process.env.PORT) || 3000;
 const TZ = 'Asia/Hong_Kong';
@@ -24,24 +25,11 @@ const WINDOWS = [
   { label: 'Yearly',    days: 365 },
 ];
 
-function todayHKT() {
-  const now = new Date();
-  const hkMs = now.getTime() + (8 * 60 - now.getTimezoneOffset()) * 60 * 1000;
-  return new Date(hkMs).toISOString().slice(0, 10);
-}
-
-function nowIsoUtc() {
-  return new Date().toISOString().replace(/\.\d+Z$/, 'Z');
-}
-
 function pickTargetsForHour(hkHour) {
   const offset = hkHour - FIRST_HOUR;
   if (offset < 0 || offset >= WINDOW_HOURS) return [];
   return TARGETS.filter((_, i) => i % WINDOW_HOURS === offset);
 }
-
-function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
-function jitter(minMs, maxMs) { return Math.floor(minMs + Math.random() * (maxMs - minMs)); }
 
 function subtractDays(dateStr, days) {
   const d = new Date(dateStr + 'T00:00:00Z');
@@ -79,57 +67,6 @@ function computeDiffs(history) {
     return { label, days, baseline_date: baseline.date, baseline_count: baseline.count, diff, pct };
   });
   return { current: latest, diffs, total_snapshots: history.length };
-}
-
-// --- Scheduled scraping ------------------------------------------------
-
-let cronLock = false;
-async function runBatch(targets, reason) {
-  if (cronLock) {
-    console.log(`[cron] skip (${reason}) — previous run still active`);
-    return { skipped: true, reason: 'locked' };
-  }
-  cronLock = true;
-  console.log(`[cron] ${reason}: ${targets.length} target(s)`);
-  const date = todayHKT();
-  const results = [];
-  let browser;
-  try {
-    browser = await launchBrowser();
-  } catch (err) {
-    await logError({ stage: 'browser_launch', error: err.message });
-    cronLock = false;
-    throw err;
-  }
-
-  try {
-    for (let i = 0; i < targets.length; i++) {
-      const target = targets[i];
-      const startedAt = Date.now();
-      try {
-        const { count, tookMs } = await scrapeTarget(target.id, { browser });
-        await upsertHistory(target.id, { date, count, fetched_at_utc: nowIsoUtc() });
-        results.push({ id: target.id, name: target.name, count, tookMs, ok: true });
-        console.log(`  [${target.name}] count=${count} (${tookMs}ms)`);
-      } catch (err) {
-        const msg = err.message || String(err);
-        console.error(`  [${target.name}] FAILED:`, msg);
-        await logError({
-          page_id: target.id,
-          name: target.name,
-          stage: 'scrape',
-          error: msg,
-          took_ms: Date.now() - startedAt,
-        });
-        results.push({ id: target.id, name: target.name, ok: false, error: msg });
-      }
-      if (i < targets.length - 1) await sleep(jitter(3000, 8000));
-    }
-  } finally {
-    try { await browser.close(); } catch {}
-    cronLock = false;
-  }
-  return { date, scraped: results.length, ok: results.filter((r) => r.ok).length, failed: results.filter((r) => !r.ok).length, results };
 }
 
 // --- Express server ----------------------------------------------------
@@ -226,23 +163,31 @@ app.listen(PORT, '0.0.0.0', () => {
 });
 
 // --- Schedule: every hour at :30, HKT 09:30-17:30 ----------------------
+//
+// On Render, the web service can sleep after 15min of idle (free tier), so
+// in-process cron is unreliable. Render runs a separate Cron Job service
+// (scripts/scrape-all.js) and sets RENDER=true, so we skip scheduling here
+// to avoid double scraping.
 
-cron.schedule('30 9-17 * * *', async () => {
-  const hkHour = Number(
-    new Intl.DateTimeFormat('en-GB', { hour: '2-digit', hour12: false, timeZone: TZ })
-      .formatToParts(new Date())
-      .find((p) => p.type === 'hour').value,
-  );
-  const batch = pickTargetsForHour(hkHour);
-  if (batch.length === 0) {
-    console.log(`[cron] HKT ${hkHour}:30 no targets for this slot`);
-    return;
-  }
-  try {
-    await runBatch(batch, `HKT ${hkHour}:30`);
-  } catch (err) {
-    console.error(`[cron] HKT ${hkHour}:30 failed:`, err.message);
-  }
-}, { timezone: TZ });
-
-console.log(`[cron] scheduled: 30 9-17 * * * (${TZ})`);
+if (process.env.RENDER) {
+  console.log('[cron] skipped (RENDER=true — Render Cron Job handles scheduling)');
+} else {
+  cron.schedule('30 9-17 * * *', async () => {
+    const hkHour = Number(
+      new Intl.DateTimeFormat('en-GB', { hour: '2-digit', hour12: false, timeZone: TZ })
+        .formatToParts(new Date())
+        .find((p) => p.type === 'hour').value,
+    );
+    const batch = pickTargetsForHour(hkHour);
+    if (batch.length === 0) {
+      console.log(`[cron] HKT ${hkHour}:30 no targets for this slot`);
+      return;
+    }
+    try {
+      await runBatch(batch, `HKT ${hkHour}:30`);
+    } catch (err) {
+      console.error(`[cron] HKT ${hkHour}:30 failed:`, err.message);
+    }
+  }, { timezone: TZ });
+  console.log(`[cron] scheduled: 30 9-17 * * * (${TZ})`);
+}
