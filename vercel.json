@@ -5,10 +5,12 @@
   "functions": {
     "api/cron.js": {
       "maxDuration": 300,
+      "memory": 3008,
       "includeFiles": "node_modules/@sparticuz/chromium/bin/**"
     },
     "api/trigger.js": {
       "maxDuration": 60,
+      "memory": 3008,
       "includeFiles": "node_modules/@sparticuz/chromium/bin/**"
     },
     "api/data.js": { "maxDuration": 10 }

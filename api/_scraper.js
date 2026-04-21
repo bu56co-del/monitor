@@ -205,7 +205,11 @@ async function launchBrowser() {
   }
 }
 
-function annotateWithBrowserDiag(err, browser) {
+async function annotateWithBrowserDiag(err, browser) {
+  // Give proc 'exit' event a tick to fire — it usually runs just after
+  // 'disconnected' but the catch block races ahead of it. A short await
+  // lets the signal/exit code land in __events before we snapshot.
+  await new Promise((r) => setTimeout(r, 200));
   const stderr = (browser && browser.__stderrBuf) ? browser.__stderrBuf.join('').slice(-2000) : '';
   const events = (browser && browser.__events) ? browser.__events.slice(-10) : [];
   err.message = `${err.message} | events=${JSON.stringify(events)} | chromium stderr: ${stderr || '(empty)'}`;
@@ -285,7 +289,7 @@ async function scrapeTarget(pageId, { browser } = {}) {
     await page.close();
     return { count, url, tookMs: Date.now() - startedAt };
   } catch (err) {
-    throw annotateWithBrowserDiag(err, b);
+    throw await annotateWithBrowserDiag(err, b);
   } finally {
     if (ownBrowser && b) {
       try { await b.close(); } catch { /* ignore */ }
