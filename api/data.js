@@ -49,7 +49,7 @@ function computeDiffs(history) {
 
 module.exports = async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Cache-Control', 's-maxage=60, stale-while-revalidate=30');
+  res.setHeader('Cache-Control', 'no-store');
 
   if (!isKvConfigured()) {
     return res.status(500).json({
