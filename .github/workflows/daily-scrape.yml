@@ -1,0 +1,40 @@
+name: Daily scrape
+
+# Pings the Render web service once a day, which wakes it up (free tier
+# sleeps after 15min idle) and triggers a scrape of every target. The
+# /api/cron?force=1 endpoint runs the same batch scraper used by the
+# "Force run all" button in the dashboard.
+
+on:
+  schedule:
+    # 02:00 UTC = 10:00 HKT every day.
+    - cron: "0 2 * * *"
+  # Allow manually kicking the workflow from the GitHub Actions UI.
+  workflow_dispatch:
+
+concurrency:
+  group: daily-scrape
+  cancel-in-progress: false
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Ping Render /api/cron
+        env:
+          # After first deploy, set this repo secret to the full URL shown
+          # in your Render dashboard, e.g.
+          #   https://fb-ads-monitor.onrender.com/api/cron?force=1
+          CRON_URL: ${{ secrets.RENDER_CRON_URL }}
+        run: |
+          set -eo pipefail
+          if [ -z "$CRON_URL" ]; then
+            echo "::error::RENDER_CRON_URL repo secret not set"
+            exit 1
+          fi
+          # Cold start + 12 target scrape can take 3-4 minutes.
+          curl --fail --show-error \
+               --max-time 600 \
+               --retry 2 --retry-delay 15 \
+               "$CRON_URL"
