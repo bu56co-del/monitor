@@ -30,7 +30,7 @@ jobs:
         env:
           RENDER_URL: ${{ secrets.RENDER_URL }}
         run: |
-          # All 12 targets (same order as lib/targets.js)
+          # All 13 targets (same order as lib/targets.js)
           TARGETS=(
             "110379081699089|HKMPM (original)"
             "89863844963|NYMG"
@@ -44,6 +44,7 @@ jobs:
             "624480124596923|Excel Medical Group"
             "101464375049675|菁森日本理療所"
             "107468998477970|Perle signature"
+            "111895960717990|Me Paincare"
           )
 
           OK=0

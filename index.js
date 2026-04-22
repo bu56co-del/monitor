@@ -18,11 +18,11 @@ const FIRST_HOUR = 9;
 const WINDOW_HOURS = 9; // 9,10,11,12,13,14,15,16,17 → 9 slots at xx:30
 
 const WINDOWS = [
-  { label: 'Daily',     days: 1   },
-  { label: 'Weekly',    days: 7   },
-  { label: 'Monthly',   days: 30  },
-  { label: 'Quarterly', days: 90  },
-  { label: 'Yearly',    days: 365 },
+  { label: '1D',  days: 1  },
+  { label: '7D',  days: 7  },
+  { label: '14D', days: 14 },
+  { label: '30D', days: 30 },
+  { label: '60D', days: 60 },
 ];
 
 function pickTargetsForHour(hkHour) {

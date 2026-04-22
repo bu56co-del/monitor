@@ -162,11 +162,11 @@
       <tr>
         <th>Target</th>
         <th class="num">Current</th>
-        <th class="num">1d</th>
-        <th class="num">7d</th>
-        <th class="num">30d</th>
-        <th class="num">90d</th>
-        <th class="num">365d</th>
+        <th class="num">1D</th>
+        <th class="num">7D</th>
+        <th class="num">14D</th>
+        <th class="num">30D</th>
+        <th class="num">60D</th>
         <th></th>
       </tr>
     </thead>
@@ -216,7 +216,10 @@
       ? ` <span style="opacity:0.65">(${d.pct > 0 ? '+' : ''}${d.pct}%)</span>`
       : '';
     const cls = d.diff > 0 ? 'diff-up' : d.diff < 0 ? 'diff-down' : 'diff-zero';
-    return `<span class="${cls}">${sign}${d.diff}${pctStr}</span>`;
+    const baseline = d.baseline_count !== null && d.baseline_count !== undefined
+      ? `<div class="count-date">${fmtNum(d.baseline_count)}</div>`
+      : '';
+    return `${baseline}<span class="${cls}">${sign}${d.diff}${pctStr}</span>`;
   }
 
   function renderRow(t) {
@@ -236,11 +239,11 @@
           <div class="target-id">${t.id}</div>
         </td>
         <td class="num">${current}</td>
-        <td class="num">${fmtDiffCell(diffsByLabel.Daily)}</td>
-        <td class="num">${fmtDiffCell(diffsByLabel.Weekly)}</td>
-        <td class="num">${fmtDiffCell(diffsByLabel.Monthly)}</td>
-        <td class="num">${fmtDiffCell(diffsByLabel.Quarterly)}</td>
-        <td class="num">${fmtDiffCell(diffsByLabel.Yearly)}</td>
+        <td class="num">${fmtDiffCell(diffsByLabel['1D'])}</td>
+        <td class="num">${fmtDiffCell(diffsByLabel['7D'])}</td>
+        <td class="num">${fmtDiffCell(diffsByLabel['14D'])}</td>
+        <td class="num">${fmtDiffCell(diffsByLabel['30D'])}</td>
+        <td class="num">${fmtDiffCell(diffsByLabel['60D'])}</td>
         <td class="actions">
           <button class="fetch-btn" data-id="${t.id}" data-name="${t.name.replace(/"/g, '&quot;')}">
             ↻ Fetch now
