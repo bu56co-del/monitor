@@ -125,6 +125,46 @@ app.post('/api/trigger', async (req, res) => {
   }
 });
 
+// One-shot admin endpoint to copy production Redis keys into a namespaced
+// copy. Refuses on production (where STORAGE_NAMESPACE is unset) — only the
+// staging environment may pull data into its own namespace.
+app.post('/api/admin/migrate', async (req, res) => {
+  if (!process.env.STORAGE_NAMESPACE) {
+    return res.status(403).json({ error: 'Refusing to run on production (STORAGE_NAMESPACE is empty).' });
+  }
+  const adminToken = process.env.ADMIN_TOKEN;
+  if (!adminToken) {
+    return res.status(500).json({ error: 'ADMIN_TOKEN env var not configured.' });
+  }
+  const provided = req.query.token || (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+  if (provided !== adminToken) {
+    return res.status(403).json({ error: 'Bad or missing token.' });
+  }
+
+  const { Redis } = require('@upstash/redis');
+  const { migrateNamespace } = require('./lib/migrate');
+
+  if (!process.env.UPSTASH_REDIS_REST_URL || !process.env.UPSTASH_REDIS_REST_TOKEN) {
+    return res.status(500).json({ error: 'Upstash credentials not configured.' });
+  }
+
+  const redis = new Redis({
+    url: process.env.UPSTASH_REDIS_REST_URL,
+    token: process.env.UPSTASH_REDIS_REST_TOKEN,
+  });
+
+  try {
+    const summary = await migrateNamespace(redis, {
+      sourceNs: req.query.source || '',
+      targetNs: process.env.STORAGE_NAMESPACE,
+      force: req.query.force === '1',
+    });
+    res.json({ ok: true, target_namespace: process.env.STORAGE_NAMESPACE, ...summary });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Force-run all targets right now (bypasses schedule). Used by the
 // "Force run all" button and for first-time seeding.
 app.get('/api/cron', async (req, res) => {
