@@ -237,6 +237,28 @@ app.post('/api/scrape-creatives', async (req, res) => {
   }
 });
 
+// Build the weekly competitor-intelligence report. Aggregates per-target
+// creative snapshots, asks the configured AI provider to narrate, returns
+// stats + HTML body. Designed to be called from a workflow which then
+// emails the body. Token-guarded.
+app.post('/api/admin/weekly-report', async (req, res) => {
+  const adminToken = process.env.ADMIN_TOKEN;
+  if (!adminToken) return res.status(500).json({ error: 'ADMIN_TOKEN env var not configured.' });
+  const provided = req.query.token || (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+  if (provided !== adminToken) return res.status(403).json({ error: 'Bad or missing token.' });
+
+  const { generateReport } = require('./lib/report');
+  try {
+    const opts = {};
+    if (req.query.this_week) opts.thisWeek = req.query.this_week;
+    if (req.query.last_week) opts.lastWeek = req.query.last_week;
+    const out = await generateReport(opts);
+    res.json({ ok: true, ...out });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // Smoke-test endpoint for the AI provider switcher. Token-protected because
 // it consumes upstream quota. Available in any environment that has
 // ADMIN_TOKEN + GEMINI_API_KEY (or other provider key) configured.

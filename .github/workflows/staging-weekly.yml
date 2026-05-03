@@ -81,3 +81,77 @@ jobs:
           echo "OK: $OK / $((OK + FAIL))"
           echo "Failed: $FAIL / $((OK + FAIL))"
           true
+
+      - name: Generate AI weekly report
+        id: report
+        if: success() || failure()
+        env:
+          RENDER_URL: ${{ secrets.STAGING_RENDER_URL }}
+          ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
+        run: |
+          mkdir -p /tmp/report
+          echo "Calling /api/admin/weekly-report ..."
+          HTTP_CODE=$(curl -X POST -s -o /tmp/report/report.json -w "%{http_code}" \
+            --max-time 120 \
+            "${RENDER_URL%/}/api/admin/weekly-report?token=${ADMIN_TOKEN}")
+          echo "HTTP $HTTP_CODE"
+          echo "--- Response (first 500 chars) ---"
+          head -c 500 /tmp/report/report.json
+          echo ""
+          echo "----------------------------------"
+
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "Report generation failed."
+            echo "have_report=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Pull a few fields out for the email subject + plain-text fallback.
+          WEEK=$(jq -r '.week // "?"' /tmp/report/report.json)
+          NEW_TOTAL=$(jq -r '.stats.new_total // 0' /tmp/report/report.json)
+          MOST_NEW_NAME=$(jq -r '.stats.most_new.name // "—"' /tmp/report/report.json)
+          MOST_NEW_COUNT=$(jq -r '.stats.most_new.count // 0' /tmp/report/report.json)
+
+          # Extract AI HTML body to its own file for the email step.
+          jq -r '.html // ""' /tmp/report/report.json > /tmp/report/body.html
+          if [ ! -s /tmp/report/body.html ]; then
+            echo "AI returned empty body."
+            echo "have_report=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          {
+            echo "have_report=true"
+            echo "week=$WEEK"
+            echo "new_total=$NEW_TOTAL"
+            echo "subject=[FB Ads Staging] 週報 $WEEK — 新增 $NEW_TOTAL 個廣告，$MOST_NEW_NAME 最活躍 (+$MOST_NEW_COUNT)"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Check email secrets
+        id: check_email
+        env:
+          G_USER: ${{ secrets.GMAIL_USER }}
+          G_PASS: ${{ secrets.GMAIL_APP_PASSWORD }}
+          G_TO: ${{ secrets.ALERT_EMAIL }}
+        run: |
+          if [ -n "$G_USER" ] && [ -n "$G_PASS" ] && [ -n "$G_TO" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "Skipping email — one of GMAIL_USER / GMAIL_APP_PASSWORD / ALERT_EMAIL secrets is missing."
+          fi
+
+      - name: Send weekly report email
+        if: steps.report.outputs.have_report == 'true' && steps.check_email.outputs.ready == 'true'
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          secure: true
+          username: ${{ secrets.GMAIL_USER }}
+          password: ${{ secrets.GMAIL_APP_PASSWORD }}
+          from: FB Ads Monitor <${{ secrets.GMAIL_USER }}>
+          to: ${{ secrets.ALERT_EMAIL }}
+          subject: ${{ steps.report.outputs.subject }}
+          html_body: file:///tmp/report/body.html
+          convert_markdown: false
