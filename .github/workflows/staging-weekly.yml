@@ -1,0 +1,83 @@
+name: Staging — Weekly creatives + report (manual)
+
+# Manual-trigger only on staging. Validates the weekly creative scraper and
+# AI report end-to-end against the staging Render service before we wire
+# this up on production.
+on:
+  workflow_dispatch:
+    inputs:
+      max_ads_per_target:
+        description: 'Max ads to capture per target'
+        required: false
+        default: '50'
+
+concurrency:
+  group: staging-weekly
+  cancel-in-progress: false
+
+jobs:
+  weekly:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Wake up Render staging
+        env:
+          RENDER_URL: ${{ secrets.STAGING_RENDER_URL }}
+        run: |
+          echo "Waking up staging Render..."
+          curl --fail --show-error -s --max-time 120 --retry 2 --retry-delay 10 \
+            -o /dev/null -w "Wake up: HTTP %{http_code} in %{time_total}s\n" \
+            "${RENDER_URL%/}"
+          sleep 10
+
+      - name: Scrape creatives for all 13 targets
+        env:
+          RENDER_URL: ${{ secrets.STAGING_RENDER_URL }}
+          MAX_ADS: ${{ github.event.inputs.max_ads_per_target || '50' }}
+        run: |
+          TARGETS=(
+            "110379081699089|HKMPM (original)"
+            "89863844963|NYMG"
+            "389829531491007|HK Pain Tech"
+            "172307579523899|德善健康管理"
+            "117604888113796|悟空的心情"
+            "103624385951092|新希望"
+            "106527928198209|CO Health Care"
+            "115283196839127|inlife"
+            "103907508885531|Swisso Health"
+            "624480124596923|Excel Medical Group"
+            "101464375049675|菁森日本理療所"
+            "107468998477970|Perle signature"
+            "111895960717990|Me Paincare"
+          )
+
+          OK=0
+          FAIL=0
+
+          for entry in "${TARGETS[@]}"; do
+            ID="${entry%%|*}"
+            NAME="${entry##*|}"
+            echo ""
+            echo "=== [$NAME] (ID: $ID) ==="
+
+            # 10 minute timeout per target — creatives scrape is heavier.
+            if curl -X POST --fail --show-error --max-time 600 \
+              "${RENDER_URL%/}/api/scrape-creatives?id=${ID}&max=${MAX_ADS}" 2>&1; then
+              echo ""
+              echo ">>> OK"
+              OK=$((OK + 1))
+            else
+              echo ""
+              echo ">>> FAILED (skipping)"
+              FAIL=$((FAIL + 1))
+            fi
+
+            echo "Sleeping 30s before next target..."
+            sleep 30
+          done
+
+          echo ""
+          echo "========== STAGING WEEKLY SUMMARY =========="
+          echo "OK: $OK / $((OK + FAIL))"
+          echo "Failed: $FAIL / $((OK + FAIL))"
+          true

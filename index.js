@@ -4,9 +4,21 @@ const os = require('os');
 const cron = require('node-cron');
 
 const TARGETS = require('./lib/targets');
-const { scrapeTarget } = require('./lib/scraper');
-const { getHistory, upsertHistory, getErrors, logError } = require('./lib/storage');
+const { scrapeTarget, scrapeCreatives } = require('./lib/scraper');
+const {
+  getHistory, upsertHistory, getErrors, logError,
+  getCreatives, saveCreatives, saveWeeklySnapshot,
+} = require('./lib/storage');
 const { runBatch, todayHKT, nowIsoUtc } = require('./lib/batch');
+
+// ISO week label like "2026-W18" — used to bucket weekly creative snapshots.
+function isoWeek(date = new Date()) {
+  const d = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+  d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay() || 7));
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  const weekNum = Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+  return `${d.getUTCFullYear()}-W${String(weekNum).padStart(2, '0')}`;
+}
 
 const PORT = Number(process.env.PORT) || 3000;
 const TZ = 'Asia/Hong_Kong';
@@ -162,6 +174,66 @@ app.post('/api/admin/migrate', async (req, res) => {
     res.json({ ok: true, target_namespace: process.env.STORAGE_NAMESPACE, ...summary });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// Scrape per-ad detail (body, image, CTA, landing URL, started date) for one
+// target and merge into the persistent creatives store. Captures ad_ids in a
+// weekly snapshot so we can diff new vs removed ads later. Same shape as
+// /api/trigger but heavier — designed to be called from the weekly workflow.
+app.post('/api/scrape-creatives', async (req, res) => {
+  const id = (req.query.id || '').toString().trim();
+  if (!id) return res.status(400).json({ error: 'Missing ?id=<page_id>' });
+  const target = TARGETS.find((t) => t.id === id);
+  if (!target) return res.status(404).json({ error: `Unknown target id: ${id}` });
+
+  const max = Math.min(parseInt(req.query.max, 10) || 50, 100);
+  const startedAt = Date.now();
+  try {
+    const { ads, url, tookMs } = await scrapeCreatives(target.id, { max });
+
+    const existing = await getCreatives(target.id);
+    const nowIso = nowIsoUtc();
+    const merged = { ...existing };
+    let newCount = 0;
+    for (const ad of ads) {
+      if (!ad || !ad.id) continue;
+      if (merged[ad.id]) {
+        merged[ad.id] = { ...merged[ad.id], ...ad, last_seen_iso: nowIso };
+      } else {
+        merged[ad.id] = { ...ad, first_seen_iso: nowIso, last_seen_iso: nowIso };
+        newCount += 1;
+      }
+    }
+    await saveCreatives(target.id, merged);
+    await saveWeeklySnapshot(target.id, isoWeek(), ads.map((a) => a.id));
+
+    res.json({
+      id: target.id,
+      name: target.name,
+      total_ads: ads.length,
+      new_ads: newCount,
+      week: isoWeek(),
+      url,
+      tookMs,
+      total_tookMs: Date.now() - startedAt,
+    });
+  } catch (err) {
+    const msg = err.message || String(err);
+    await logError({
+      page_id: target.id,
+      name: target.name,
+      stage: 'scrape_creatives',
+      error: msg,
+      took_ms: Date.now() - startedAt,
+    });
+    res.status(500).json({
+      stage: 'scrape_creatives',
+      id: target.id,
+      name: target.name,
+      error: msg,
+      tookMs: Date.now() - startedAt,
+    });
   }
 });
 
