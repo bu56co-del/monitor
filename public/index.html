@@ -150,7 +150,6 @@
 <header>
   <span class="brand">FB Ads Monitor</span>
   <div>
-    <button id="force-all" title="Scrape all targets now (ignores schedule)">⚡ Force run all</button>
     <button id="refresh">↻ Refresh</button>
   </div>
 </header>
@@ -174,6 +173,12 @@
       <tr><td colspan="8" style="text-align:center;padding:1.5rem;color:#555">Loading…</td></tr>
     </tbody>
   </table>
+</div>
+
+<div class="card" id="weekly-card">
+  <h2>📊 Weekly competitor report</h2>
+  <div id="weekly-meta" style="font-size:0.78rem;color:#666;margin-bottom:0.85rem">Loading…</div>
+  <div id="weekly-body" style="font-size:0.92rem;line-height:1.55;color:#d8d8d8"></div>
 </div>
 
 <div class="card">
@@ -340,33 +345,40 @@
     }
   }
 
-  async function forceAll(btn) {
-    if (!confirm('Scrape ALL targets right now? This takes a minute or two.')) return;
-    btn.disabled = true;
-    const original = btn.textContent;
-    btn.textContent = '… running';
+  async function loadWeeklyReport() {
+    const meta = document.getElementById('weekly-meta');
+    const body = document.getElementById('weekly-body');
     try {
-      const res = await fetch('/api/cron?force=1');
-      const body = await res.json();
-      if (res.status >= 500) throw new Error(body.error || `HTTP ${res.status}`);
-      alert(`Done.\nScraped: ${body.scraped}\nOK: ${body.ok}\nFailed: ${body.failed}`);
-      await load();
+      const res = await fetch('/api/weekly-report?t=' + Date.now(), { cache: 'no-store' });
+      const data = await res.json();
+      if (!data || !data.html) {
+        meta.textContent = 'No weekly report yet — run the weekly workflow once.';
+        body.innerHTML = '';
+        return;
+      }
+      const stats = data.stats || {};
+      const generatedAt = data.generated_at ? new Date(data.generated_at).toLocaleString() : '—';
+      meta.innerHTML =
+        `Week ${data.week || '?'} &nbsp;·&nbsp; ` +
+        `New ads: <strong>${stats.new_total ?? '?'}</strong> &nbsp;·&nbsp; ` +
+        `Removed: <strong>${stats.removed_total ?? '?'}</strong> &nbsp;·&nbsp; ` +
+        `Most active: <strong>${stats.most_new?.name ?? '—'}</strong> (+${stats.most_new?.count ?? 0}) &nbsp;·&nbsp; ` +
+        `Generated ${generatedAt}`;
+      body.innerHTML = data.html;
     } catch (e) {
-      alert('Force run failed: ' + e.message);
-    } finally {
-      btn.disabled = false;
-      btn.textContent = original;
+      meta.textContent = 'Weekly report fetch failed: ' + e.message;
+      body.innerHTML = '';
     }
   }
 
-  document.getElementById('refresh').addEventListener('click', load);
-  document.getElementById('force-all').addEventListener('click', (e) => forceAll(e.currentTarget));
+  document.getElementById('refresh').addEventListener('click', () => { load(); loadWeeklyReport(); });
   document.getElementById('rows').addEventListener('click', (e) => {
     const btn = e.target.closest('.fetch-btn');
     if (!btn) return;
     fetchOne(btn.dataset.id, btn.dataset.name, btn);
   });
   load();
+  loadWeeklyReport();
 </script>
 </body>
 </html>

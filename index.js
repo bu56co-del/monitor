@@ -260,6 +260,19 @@ app.post('/api/admin/weekly-report', express.json({ limit: '1mb' }), async (req,
   }
 });
 
+// Public read of the most recent weekly report (cached by the workflow
+// when it runs). Returns null if no report has ever been generated.
+app.get('/api/weekly-report', async (req, res) => {
+  const { getLatestWeeklyReport } = require('./lib/storage');
+  try {
+    const report = await getLatestWeeklyReport();
+    res.setHeader('Cache-Control', 'no-store');
+    res.json(report || { ok: false, error: 'No weekly report yet — workflow has not produced one.' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Same digest data as weekly-report but without the AI call. Used by the
 // workflow before screenshotting so it knows which landing URLs are new.
 app.get('/api/admin/digest', async (req, res) => {
