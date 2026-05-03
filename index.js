@@ -165,6 +165,26 @@ app.post('/api/admin/migrate', async (req, res) => {
   }
 });
 
+// Smoke-test endpoint for the AI provider switcher. Token-protected because
+// it consumes upstream quota. Available in any environment that has
+// ADMIN_TOKEN + GEMINI_API_KEY (or other provider key) configured.
+app.post('/api/admin/ai-test', async (req, res) => {
+  const adminToken = process.env.ADMIN_TOKEN;
+  if (!adminToken) return res.status(500).json({ error: 'ADMIN_TOKEN env var not configured.' });
+  const provided = req.query.token || (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+  if (provided !== adminToken) return res.status(403).json({ error: 'Bad or missing token.' });
+
+  const ai = require('./lib/ai');
+  const prompt = req.query.prompt || 'In one short sentence, say hello and confirm you are working.';
+
+  try {
+    const out = await ai.chat(prompt, { maxTokens: 200 });
+    res.json({ ok: true, provider: out.provider, model: out.model, prompt, response: out.text, usage: out.usage });
+  } catch (err) {
+    res.status(500).json({ ok: false, provider: ai.provider(), error: err.message });
+  }
+});
+
 // Force-run all targets right now (bypasses schedule). Used by the
 // "Force run all" button and for first-time seeding.
 app.get('/api/cron', async (req, res) => {
