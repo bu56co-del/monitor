@@ -1,8 +1,8 @@
 name: Staging — Weekly creatives + report (manual)
 
-# Manual-trigger only on staging. Validates the weekly creative scraper and
-# AI report end-to-end against the staging Render service before we wire
-# this up on production.
+# Manual-trigger only on staging. Validates the weekly creative scraper,
+# landing-page screenshot diff, and AI report end-to-end against the
+# staging Render service before we wire this up on production.
 on:
   workflow_dispatch:
     inputs:
@@ -10,6 +10,9 @@ on:
         description: 'Max ads to capture per target'
         required: false
         default: '50'
+
+permissions:
+  contents: write   # so the workflow can commit baseline screenshots back
 
 concurrency:
   group: staging-weekly
@@ -20,6 +23,20 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
+      - name: Checkout staging branch
+        uses: actions/checkout@v4
+        with:
+          ref: staging
+          fetch-depth: 1
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install diff dependencies
+        run: npm install --no-save pixelmatch@^5.3.0 pngjs@^7.0.0
+
       - name: Wake up Render staging
         env:
           RENDER_URL: ${{ secrets.STAGING_RENDER_URL }}
@@ -82,6 +99,30 @@ jobs:
           echo "Failed: $FAIL / $((OK + FAIL))"
           true
 
+      - name: Screenshot + diff new landing pages
+        id: diffs
+        if: success() || failure()
+        env:
+          RENDER_URL: ${{ secrets.STAGING_RENDER_URL }}
+          ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
+        run: |
+          node scripts/screenshot-diff.js
+          echo "have_diffs=true" >> "$GITHUB_OUTPUT"
+
+      - name: Commit updated screenshots back to staging
+        if: steps.diffs.outputs.have_diffs == 'true'
+        run: |
+          if [ -n "$(git status --porcelain screenshots/)" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add screenshots/
+            COUNT=$(git diff --cached --name-only screenshots/ | wc -l | tr -d ' ')
+            git commit -m "chore(screenshots): update ${COUNT} landing pages [skip ci]"
+            git push origin staging
+          else
+            echo "No screenshot changes to commit."
+          fi
+
       - name: Generate AI weekly report
         id: report
         if: success() || failure()
@@ -90,9 +131,17 @@ jobs:
           ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
         run: |
           mkdir -p /tmp/report
+          DIFFS_JSON='[]'
+          if [ -f /tmp/landing-diffs.json ]; then
+            DIFFS_JSON=$(cat /tmp/landing-diffs.json)
+          fi
+          BODY=$(jq -n --argjson diffs "$DIFFS_JSON" '{landing_diffs: $diffs}')
+
           echo "Calling /api/admin/weekly-report ..."
           HTTP_CODE=$(curl -X POST -s -o /tmp/report/report.json -w "%{http_code}" \
             --max-time 120 \
+            -H "Content-Type: application/json" \
+            -d "$BODY" \
             "${RENDER_URL%/}/api/admin/weekly-report?token=${ADMIN_TOKEN}")
           echo "HTTP $HTTP_CODE"
           echo "--- Response (first 500 chars) ---"
@@ -106,13 +155,11 @@ jobs:
             exit 0
           fi
 
-          # Pull a few fields out for the email subject + plain-text fallback.
           WEEK=$(jq -r '.week // "?"' /tmp/report/report.json)
           NEW_TOTAL=$(jq -r '.stats.new_total // 0' /tmp/report/report.json)
           MOST_NEW_NAME=$(jq -r '.stats.most_new.name // "—"' /tmp/report/report.json)
           MOST_NEW_COUNT=$(jq -r '.stats.most_new.count // 0' /tmp/report/report.json)
 
-          # Extract AI HTML body to its own file for the email step.
           jq -r '.html // ""' /tmp/report/report.json > /tmp/report/body.html
           if [ ! -s /tmp/report/body.html ]; then
             echo "AI returned empty body."

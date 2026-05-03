@@ -4,7 +4,7 @@ const os = require('os');
 const cron = require('node-cron');
 
 const TARGETS = require('./lib/targets');
-const { scrapeTarget, scrapeCreatives } = require('./lib/scraper');
+const { scrapeTarget, scrapeCreatives, screenshotUrl } = require('./lib/scraper');
 const {
   getHistory, upsertHistory, getErrors, logError,
   getCreatives, saveCreatives, saveWeeklySnapshot,
@@ -241,7 +241,7 @@ app.post('/api/scrape-creatives', async (req, res) => {
 // creative snapshots, asks the configured AI provider to narrate, returns
 // stats + HTML body. Designed to be called from a workflow which then
 // emails the body. Token-guarded.
-app.post('/api/admin/weekly-report', async (req, res) => {
+app.post('/api/admin/weekly-report', express.json({ limit: '1mb' }), async (req, res) => {
   const adminToken = process.env.ADMIN_TOKEN;
   if (!adminToken) return res.status(500).json({ error: 'ADMIN_TOKEN env var not configured.' });
   const provided = req.query.token || (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
@@ -252,10 +252,52 @@ app.post('/api/admin/weekly-report', async (req, res) => {
     const opts = {};
     if (req.query.this_week) opts.thisWeek = req.query.this_week;
     if (req.query.last_week) opts.lastWeek = req.query.last_week;
+    if (req.body && Array.isArray(req.body.landing_diffs)) opts.landingDiffs = req.body.landing_diffs;
     const out = await generateReport(opts);
     res.json({ ok: true, ...out });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// Same digest data as weekly-report but without the AI call. Used by the
+// workflow before screenshotting so it knows which landing URLs are new.
+app.get('/api/admin/digest', async (req, res) => {
+  const adminToken = process.env.ADMIN_TOKEN;
+  if (!adminToken) return res.status(500).json({ error: 'ADMIN_TOKEN env var not configured.' });
+  const provided = req.query.token || (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+  if (provided !== adminToken) return res.status(403).json({ error: 'Bad or missing token.' });
+
+  const { buildDigest } = require('./lib/report');
+  try {
+    const opts = {};
+    if (req.query.this_week) opts.thisWeek = req.query.this_week;
+    if (req.query.last_week) opts.lastWeek = req.query.last_week;
+    const digest = await buildDigest(opts);
+    res.json({ ok: true, ...digest });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// Screenshot a landing URL on the Render host (which has Puppeteer +
+// Chromium) and return base64 PNG. The workflow uses this to capture
+// landing pages without installing Chromium in the runner.
+app.post('/api/admin/screenshot', async (req, res) => {
+  const adminToken = process.env.ADMIN_TOKEN;
+  if (!adminToken) return res.status(500).json({ error: 'ADMIN_TOKEN env var not configured.' });
+  const provided = req.query.token || (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+  if (provided !== adminToken) return res.status(403).json({ error: 'Bad or missing token.' });
+
+  const url = (req.query.url || '').toString();
+  if (!url || !/^https?:\/\//.test(url)) return res.status(400).json({ error: 'Missing or invalid ?url=' });
+
+  const startedAt = Date.now();
+  try {
+    const buf = await screenshotUrl(url);
+    res.json({ ok: true, url, base64: buf.toString('base64'), bytes: buf.length, tookMs: Date.now() - startedAt });
+  } catch (err) {
+    res.status(500).json({ ok: false, url, error: err.message, tookMs: Date.now() - startedAt });
   }
 });
 
