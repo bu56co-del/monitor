@@ -134,6 +134,148 @@
     .flash { color: #4ade80; font-size: 0.75rem; margin-left: 0.5rem; }
     .flash.err { color: #f87171; }
 
+    /* Weekly report card body — give the AI-rendered HTML proper hierarchy */
+    #weekly-meta {
+      font-size: 0.78rem;
+      color: #777;
+      margin-bottom: 1rem;
+      line-height: 1.7;
+    }
+    #weekly-meta strong { color: #cfcfcf; font-weight: 600; }
+    #weekly-body {
+      font-size: 0.9rem;
+      line-height: 1.65;
+      color: #d8d8d8;
+    }
+    #weekly-body h3 {
+      font-size: 0.86rem;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      color: #fff;
+      margin: 1.6rem 0 0.7rem;
+      padding-bottom: 0.45rem;
+      border-bottom: 1px solid #2a2a2a;
+    }
+    #weekly-body h3:first-child { margin-top: 0; }
+    #weekly-body h4 {
+      font-size: 0.83rem;
+      font-weight: 600;
+      color: #cfd;
+      margin: 1.1rem 0 0.4rem;
+      padding: 0.5rem 0.75rem;
+      background: #181d18;
+      border-left: 3px solid #4a5;
+      border-radius: 4px;
+    }
+    #weekly-body ul {
+      margin: 0.3rem 0 0.8rem 0;
+      padding-left: 1.4rem;
+      list-style: none;
+    }
+    #weekly-body li {
+      position: relative;
+      margin: 0.35rem 0;
+      padding-left: 0.2rem;
+    }
+    #weekly-body li::before {
+      content: '·';
+      position: absolute;
+      left: -0.9rem;
+      top: -0.05rem;
+      color: #555;
+      font-weight: 700;
+    }
+    #weekly-body strong { color: #f5f5f5; font-weight: 600; }
+    #weekly-body p { margin: 0.5rem 0; }
+    /* Highlight the rotation/total-change paired bullets the AI emits */
+    #weekly-body h4 + ul li:first-child::before { color: #4ade80; }
+
+    /* History modal */
+    .modal {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.7);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+      padding: 1.5rem;
+    }
+    .modal.hidden { display: none; }
+    .modal-content {
+      background: #161616;
+      border: 1px solid #333;
+      border-radius: 14px;
+      width: 100%;
+      max-width: 720px;
+      max-height: 85vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .modal-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 1.1rem 1.5rem;
+      border-bottom: 1px solid #222;
+    }
+    .modal-header h3 {
+      font-size: 0.95rem;
+      color: #e8e8e8;
+      font-weight: 600;
+      margin: 0;
+    }
+    .modal-header .meta {
+      font-size: 0.72rem;
+      color: #666;
+      margin-top: 0.2rem;
+    }
+    .modal-close {
+      background: none;
+      border: 1px solid #333;
+      color: #888;
+      font-size: 0.85rem;
+      padding: 0.3rem 0.6rem;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+    .modal-close:hover { border-color: #666; color: #ddd; }
+    .modal-body {
+      padding: 1.2rem 1.5rem;
+      overflow-y: auto;
+      flex: 1;
+    }
+    #history-chart {
+      width: 100%;
+      height: 140px;
+      margin-bottom: 1rem;
+    }
+    #history-chart svg { width: 100%; height: 100%; display: block; }
+    .history-table {
+      width: 100%;
+      font-size: 0.84rem;
+    }
+    .history-table th, .history-table td {
+      padding: 0.4rem 0.6rem;
+    }
+    .history-table th {
+      font-size: 0.66rem;
+      color: #555;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      border-bottom: 1px solid #222;
+    }
+    .history-table td {
+      border-bottom: 1px solid #1a1a1a;
+      color: #ccc;
+    }
+    .history-table tr:last-child td { border-bottom: none; }
+    .history-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+    .history-table .delta-up { color: #4ade80; }
+    .history-table .delta-down { color: #f87171; }
+    .history-table .delta-zero { color: #555; }
+
     footer {
       margin-top: 2rem;
       font-size: 0.72rem;
@@ -150,7 +292,6 @@
 <header>
   <span class="brand">FB Ads Monitor</span>
   <div>
-    <button id="force-all" title="Scrape all targets now (ignores schedule)">⚡ Force run all</button>
     <button id="refresh">↻ Refresh</button>
   </div>
 </header>
@@ -176,6 +317,12 @@
   </table>
 </div>
 
+<div class="card" id="weekly-card">
+  <h2>📊 Weekly competitor report</h2>
+  <div id="weekly-meta" style="font-size:0.78rem;color:#666;margin-bottom:0.85rem">Loading…</div>
+  <div id="weekly-body" style="font-size:0.92rem;line-height:1.55;color:#d8d8d8"></div>
+</div>
+
 <div class="card">
   <details class="errors" id="errors-details">
     <summary>
@@ -183,6 +330,32 @@
     </summary>
     <div id="errors-body"></div>
   </details>
+</div>
+
+<div id="history-modal" class="modal hidden" role="dialog" aria-modal="true">
+  <div class="modal-content">
+    <div class="modal-header">
+      <div>
+        <h3 id="history-title">Target history</h3>
+        <div class="meta" id="history-meta"></div>
+      </div>
+      <button class="modal-close" id="history-close" aria-label="Close">✕</button>
+    </div>
+    <div class="modal-body">
+      <div id="history-chart"></div>
+      <table class="history-table">
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th class="num">Count</th>
+            <th class="num">Δ vs prev</th>
+            <th>Fetched (UTC)</th>
+          </tr>
+        </thead>
+        <tbody id="history-rows"></tbody>
+      </table>
+    </div>
+  </div>
 </div>
 
 <footer>
@@ -245,6 +418,9 @@
         <td class="num">${fmtDiffCell(diffsByLabel['30D'])}</td>
         <td class="num">${fmtDiffCell(diffsByLabel['60D'])}</td>
         <td class="actions">
+          <button class="history-btn" data-id="${t.id}" data-name="${t.name.replace(/"/g, '&quot;')}" title="View full history">
+            📈 History
+          </button>
           <button class="fetch-btn" data-id="${t.id}" data-name="${t.name.replace(/"/g, '&quot;')}">
             ↻ Fetch now
           </button>
@@ -340,33 +516,145 @@
     }
   }
 
-  async function forceAll(btn) {
-    if (!confirm('Scrape ALL targets right now? This takes a minute or two.')) return;
-    btn.disabled = true;
-    const original = btn.textContent;
-    btn.textContent = '… running';
+  function renderHistoryChart(history) {
+    const host = document.getElementById('history-chart');
+    if (!history || history.length === 0) {
+      host.innerHTML = '<div style="color:#555;font-size:0.78rem;padding:1rem">No data yet.</div>';
+      return;
+    }
+    const w = 720, h = 140, padX = 30, padY = 16;
+    const counts = history.map((r) => r.count);
+    const minC = 0;
+    const maxC = Math.max(...counts, 1);
+    const xs = (i) => padX + (i / Math.max(history.length - 1, 1)) * (w - padX * 2);
+    const ys = (c) => h - padY - ((c - minC) / Math.max(maxC - minC, 1)) * (h - padY * 2);
+    const path = history.map((r, i) => `${i === 0 ? 'M' : 'L'}${xs(i).toFixed(1)},${ys(r.count).toFixed(1)}`).join(' ');
+    const points = history.map((r, i) => `<circle cx="${xs(i).toFixed(1)}" cy="${ys(r.count).toFixed(1)}" r="2.5" fill="#4ade80"></circle>`).join('');
+    const yTicks = [0, Math.round(maxC / 2), maxC]
+      .map((v) => `<text x="4" y="${ys(v) + 4}" fill="#555" font-size="10">${v}</text>`).join('');
+    host.innerHTML =
+      `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">` +
+      `<rect x="0" y="0" width="${w}" height="${h}" fill="transparent"/>` +
+      yTicks +
+      `<path d="${path}" fill="none" stroke="#4ade80" stroke-width="1.5"/>` +
+      points +
+      `</svg>`;
+  }
+
+  function renderHistoryRows(history) {
+    const tbody = document.getElementById('history-rows');
+    if (!history || history.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="4" style="text-align:center;padding:1rem;color:#555">No snapshots yet.</td></tr>`;
+      return;
+    }
+    // Newest first for the table.
+    const desc = [...history].sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+    tbody.innerHTML = desc.map((row, i) => {
+      const prev = desc[i + 1]; // older row
+      let delta = '<span class="delta-zero">—</span>';
+      if (prev) {
+        const d = row.count - prev.count;
+        const cls = d > 0 ? 'delta-up' : d < 0 ? 'delta-down' : 'delta-zero';
+        const sign = d > 0 ? '+' : '';
+        delta = `<span class="${cls}">${sign}${d}</span>`;
+      }
+      const fetchedAt = row.fetched_at_utc
+        ? new Date(row.fetched_at_utc).toISOString().replace('T', ' ').replace(/\..+$/, '')
+        : '—';
+      return `<tr>
+        <td>${row.date || '—'}</td>
+        <td class="num">${fmtNum(row.count)}</td>
+        <td class="num">${delta}</td>
+        <td>${fetchedAt}</td>
+      </tr>`;
+    }).join('');
+  }
+
+  async function openHistory(id, name) {
+    const modal = document.getElementById('history-modal');
+    document.getElementById('history-title').textContent = name;
+    document.getElementById('history-meta').textContent = 'Loading…';
+    document.getElementById('history-chart').innerHTML = '';
+    document.getElementById('history-rows').innerHTML = '';
+    modal.classList.remove('hidden');
+
     try {
-      const res = await fetch('/api/cron?force=1');
-      const body = await res.json();
-      if (res.status >= 500) throw new Error(body.error || `HTTP ${res.status}`);
-      alert(`Done.\nScraped: ${body.scraped}\nOK: ${body.ok}\nFailed: ${body.failed}`);
-      await load();
+      const res = await fetch(`/api/history?id=${encodeURIComponent(id)}`, { cache: 'no-store' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      const hist = Array.isArray(data.history) ? data.history : [];
+      const sortedAsc = [...hist].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+      const first = sortedAsc[0];
+      const last = sortedAsc[sortedAsc.length - 1];
+      document.getElementById('history-meta').textContent = hist.length
+        ? `${hist.length} snapshots · ${first?.date} → ${last?.date}`
+        : 'No snapshots yet';
+      renderHistoryChart(sortedAsc);
+      renderHistoryRows(sortedAsc);
     } catch (e) {
-      alert('Force run failed: ' + e.message);
-    } finally {
-      btn.disabled = false;
-      btn.textContent = original;
+      document.getElementById('history-meta').textContent = 'Failed: ' + e.message;
     }
   }
 
-  document.getElementById('refresh').addEventListener('click', load);
-  document.getElementById('force-all').addEventListener('click', (e) => forceAll(e.currentTarget));
+  function closeHistory() {
+    document.getElementById('history-modal').classList.add('hidden');
+  }
+
+  async function loadWeeklyReport() {
+    const meta = document.getElementById('weekly-meta');
+    const body = document.getElementById('weekly-body');
+    try {
+      const res = await fetch('/api/weekly-report?t=' + Date.now(), { cache: 'no-store' });
+      const data = await res.json();
+      if (!data || !data.html) {
+        meta.textContent = 'No weekly report yet — run the weekly workflow once.';
+        body.innerHTML = '';
+        return;
+      }
+      const stats = data.stats || {};
+      const generatedAt = data.generated_at ? new Date(data.generated_at).toLocaleString() : '—';
+      const fmtDelta = (d) => {
+        if (!d || d.delta === undefined || d.delta === 0) return '—';
+        const sign = d.delta > 0 ? '+' : '';
+        return `${d.name} (${sign}${d.delta})`;
+      };
+      meta.innerHTML =
+        `Week ${data.week || '?'} &nbsp;·&nbsp; ` +
+        `Targets: <strong>${stats.targets ?? '?'}</strong> &nbsp;·&nbsp; ` +
+        `New ads (rotation): <strong>${stats.new_ad_ids_total ?? '?'}</strong> &nbsp;·&nbsp; ` +
+        `Dropped: <strong>${stats.removed_ad_ids_total ?? '?'}</strong> &nbsp;·&nbsp; ` +
+        `Biggest gain: <strong>${fmtDelta(stats.biggest_gain)}</strong> &nbsp;·&nbsp; ` +
+        `Biggest drop: <strong>${fmtDelta(stats.biggest_drop)}</strong> &nbsp;·&nbsp; ` +
+        `Generated ${generatedAt}`;
+      body.innerHTML = data.html;
+    } catch (e) {
+      meta.textContent = 'Weekly report fetch failed: ' + e.message;
+      body.innerHTML = '';
+    }
+  }
+
+  document.getElementById('refresh').addEventListener('click', () => { load(); loadWeeklyReport(); });
   document.getElementById('rows').addEventListener('click', (e) => {
-    const btn = e.target.closest('.fetch-btn');
-    if (!btn) return;
-    fetchOne(btn.dataset.id, btn.dataset.name, btn);
+    const histBtn = e.target.closest('.history-btn');
+    if (histBtn) {
+      openHistory(histBtn.dataset.id, histBtn.dataset.name);
+      return;
+    }
+    const fetchBtn = e.target.closest('.fetch-btn');
+    if (fetchBtn) {
+      fetchOne(fetchBtn.dataset.id, fetchBtn.dataset.name, fetchBtn);
+    }
+  });
+  document.getElementById('history-close').addEventListener('click', closeHistory);
+  document.getElementById('history-modal').addEventListener('click', (e) => {
+    // Click backdrop to close.
+    if (e.target.id === 'history-modal') closeHistory();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeHistory();
   });
   load();
+  loadWeeklyReport();
 </script>
 </body>
 </html>

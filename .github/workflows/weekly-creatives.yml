@@ -1,0 +1,171 @@
+name: Weekly creatives + report
+
+# Production version of the weekly pipeline. Runs every Sunday HKT 23:00
+# (= UTC 15:00) so the report captures the full week before the boundary
+# rolls over. Manual trigger (workflow_dispatch) is also available.
+#
+# Targets the production Render service (RENDER_URL) and writes the AI
+# report to the unprefixed weekly_report:latest Upstash key — that's
+# what the production dashboard reads via GET /api/weekly-report.
+on:
+  schedule:
+    # Sunday HKT 23:00 = Sunday UTC 15:00
+    - cron: "0 15 * * 0"
+  workflow_dispatch:
+    inputs:
+      max_ads_per_target:
+        description: 'Max ads to capture per target'
+        required: false
+        default: '1000'
+
+permissions:
+  contents: write   # so the workflow can commit baseline screenshots back
+
+concurrency:
+  group: weekly
+  cancel-in-progress: false
+
+jobs:
+  weekly:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout main branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install diff dependencies
+        run: npm install --no-save pixelmatch@^5.3.0 pngjs@^7.0.0
+
+      - name: Wake up Render
+        env:
+          RENDER_URL: ${{ secrets.RENDER_URL }}
+        run: |
+          echo "Waking up Render..."
+          curl --fail --show-error -s --max-time 120 --retry 2 --retry-delay 10 \
+            -o /dev/null -w "Wake up: HTTP %{http_code} in %{time_total}s\n" \
+            "${RENDER_URL%/}"
+          sleep 10
+
+      - name: Scrape creatives for all 15 targets
+        env:
+          RENDER_URL: ${{ secrets.RENDER_URL }}
+          MAX_ADS: ${{ github.event.inputs.max_ads_per_target || '1000' }}
+        run: |
+          TARGETS=(
+            "110379081699089|HKMPM (original)"
+            "89863844963|NYMG"
+            "389829531491007|HK Pain Tech"
+            "172307579523899|德善健康管理"
+            "117604888113796|悟空的心情"
+            "103624385951092|新希望"
+            "106527928198209|CO Health Care"
+            "115283196839127|inlife"
+            "103907508885531|Swisso Health"
+            "624480124596923|Excel Medical Group"
+            "101464375049675|菁森日本理療所"
+            "107468998477970|Perle signature"
+            "111895960717990|Me Paincare"
+            "1059523747239272|痛症聯盟 Pain Alliance"
+            "810698912118269|Dr.Cure"
+          )
+
+          OK=0
+          FAIL=0
+
+          for entry in "${TARGETS[@]}"; do
+            ID="${entry%%|*}"
+            NAME="${entry##*|}"
+            echo ""
+            echo "=== [$NAME] (ID: $ID) ==="
+
+            # 10 minute timeout per target — creatives scrape is heavier.
+            if curl -X POST --fail --show-error --max-time 600 \
+              "${RENDER_URL%/}/api/scrape-creatives?id=${ID}&max=${MAX_ADS}" 2>&1; then
+              echo ""
+              echo ">>> OK"
+              OK=$((OK + 1))
+            else
+              echo ""
+              echo ">>> FAILED (skipping)"
+              FAIL=$((FAIL + 1))
+            fi
+
+            echo "Sleeping 30s before next target..."
+            sleep 30
+          done
+
+          echo ""
+          echo "========== WEEKLY SUMMARY =========="
+          echo "OK: $OK / $((OK + FAIL))"
+          echo "Failed: $FAIL / $((OK + FAIL))"
+          true
+
+      - name: Screenshot + diff new landing pages
+        id: diffs
+        if: success() || failure()
+        env:
+          RENDER_URL: ${{ secrets.RENDER_URL }}
+          ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
+        run: |
+          node scripts/screenshot-diff.js
+          echo "have_diffs=true" >> "$GITHUB_OUTPUT"
+
+      - name: Commit updated screenshots back to main
+        if: steps.diffs.outputs.have_diffs == 'true'
+        run: |
+          if [ -n "$(git status --porcelain screenshots/)" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add screenshots/
+            COUNT=$(git diff --cached --name-only screenshots/ | wc -l | tr -d ' ')
+            git commit -m "chore(screenshots): update ${COUNT} landing pages [skip ci]"
+            git push origin main
+          else
+            echo "No screenshot changes to commit."
+          fi
+
+      - name: Generate AI weekly report
+        id: report
+        if: success() || failure()
+        env:
+          RENDER_URL: ${{ secrets.RENDER_URL }}
+          ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
+        run: |
+          mkdir -p /tmp/report
+          DIFFS_JSON='[]'
+          if [ -f /tmp/landing-diffs.json ]; then
+            DIFFS_JSON=$(cat /tmp/landing-diffs.json)
+          fi
+          BODY=$(jq -n --argjson diffs "$DIFFS_JSON" '{landing_diffs: $diffs}')
+
+          echo "Calling /api/admin/weekly-report ..."
+          HTTP_CODE=$(curl -X POST -s -o /tmp/report/report.json -w "%{http_code}" \
+            --max-time 120 \
+            -H "Content-Type: application/json" \
+            -d "$BODY" \
+            "${RENDER_URL%/}/api/admin/weekly-report?token=${ADMIN_TOKEN}")
+          echo "HTTP $HTTP_CODE"
+          echo "--- Response (first 500 chars) ---"
+          head -c 500 /tmp/report/report.json
+          echo ""
+          echo "----------------------------------"
+
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "Report generation failed."
+            exit 0
+          fi
+
+          WEEK=$(jq -r '.week // "?"' /tmp/report/report.json)
+          BIG_GAIN=$(jq -r '"\(.stats.biggest_gain.name) (+\(.stats.biggest_gain.delta))"' /tmp/report/report.json)
+          BIG_DROP=$(jq -r '"\(.stats.biggest_drop.name) (\(.stats.biggest_drop.delta))"' /tmp/report/report.json)
+          echo "Week: $WEEK"
+          echo "Biggest gain: $BIG_GAIN"
+          echo "Biggest drop: $BIG_DROP"
+          echo "Report cached server-side; visit the dashboard to view."

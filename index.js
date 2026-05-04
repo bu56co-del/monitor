@@ -4,9 +4,21 @@ const os = require('os');
 const cron = require('node-cron');
 
 const TARGETS = require('./lib/targets');
-const { scrapeTarget } = require('./lib/scraper');
-const { getHistory, upsertHistory, getErrors, logError } = require('./lib/storage');
+const { scrapeTarget, scrapeCreatives, screenshotUrl } = require('./lib/scraper');
+const {
+  getHistory, upsertHistory, getErrors, logError,
+  getCreatives, saveCreatives, saveWeeklySnapshot,
+} = require('./lib/storage');
 const { runBatch, todayHKT, nowIsoUtc } = require('./lib/batch');
+
+// ISO week label like "2026-W18" — used to bucket weekly creative snapshots.
+function isoWeek(date = new Date()) {
+  const d = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+  d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay() || 7));
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  const weekNum = Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+  return `${d.getUTCFullYear()}-W${String(weekNum).padStart(2, '0')}`;
+}
 
 const PORT = Number(process.env.PORT) || 3000;
 const TZ = 'Asia/Hong_Kong';
@@ -122,6 +134,220 @@ app.post('/api/trigger', async (req, res) => {
       error: msg,
       tookMs: Date.now() - startedAt,
     });
+  }
+});
+
+// One-shot admin endpoint to copy production Redis keys into a namespaced
+// copy. Refuses on production (where STORAGE_NAMESPACE is unset) — only the
+// staging environment may pull data into its own namespace.
+app.post('/api/admin/migrate', async (req, res) => {
+  if (!process.env.STORAGE_NAMESPACE) {
+    return res.status(403).json({ error: 'Refusing to run on production (STORAGE_NAMESPACE is empty).' });
+  }
+  const adminToken = process.env.ADMIN_TOKEN;
+  if (!adminToken) {
+    return res.status(500).json({ error: 'ADMIN_TOKEN env var not configured.' });
+  }
+  const provided = req.query.token || (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+  if (provided !== adminToken) {
+    return res.status(403).json({ error: 'Bad or missing token.' });
+  }
+
+  const { Redis } = require('@upstash/redis');
+  const { migrateNamespace } = require('./lib/migrate');
+
+  if (!process.env.UPSTASH_REDIS_REST_URL || !process.env.UPSTASH_REDIS_REST_TOKEN) {
+    return res.status(500).json({ error: 'Upstash credentials not configured.' });
+  }
+
+  const redis = new Redis({
+    url: process.env.UPSTASH_REDIS_REST_URL,
+    token: process.env.UPSTASH_REDIS_REST_TOKEN,
+  });
+
+  try {
+    const summary = await migrateNamespace(redis, {
+      sourceNs: req.query.source || '',
+      targetNs: process.env.STORAGE_NAMESPACE,
+      force: req.query.force === '1',
+    });
+    res.json({ ok: true, target_namespace: process.env.STORAGE_NAMESPACE, ...summary });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Scrape per-ad detail (body, image, CTA, landing URL, started date) for one
+// target and merge into the persistent creatives store. Captures ad_ids in a
+// weekly snapshot so we can diff new vs removed ads later. Same shape as
+// /api/trigger but heavier — designed to be called from the weekly workflow.
+app.post('/api/scrape-creatives', async (req, res) => {
+  const id = (req.query.id || '').toString().trim();
+  if (!id) return res.status(400).json({ error: 'Missing ?id=<page_id>' });
+  const target = TARGETS.find((t) => t.id === id);
+  if (!target) return res.status(404).json({ error: `Unknown target id: ${id}` });
+
+  const max = Math.min(parseInt(req.query.max, 10) || 50, 100);
+  const startedAt = Date.now();
+  try {
+    const { ads, url, tookMs } = await scrapeCreatives(target.id, { max });
+
+    const existing = await getCreatives(target.id);
+    const nowIso = nowIsoUtc();
+    const merged = { ...existing };
+    let newCount = 0;
+    for (const ad of ads) {
+      if (!ad || !ad.id) continue;
+      if (merged[ad.id]) {
+        merged[ad.id] = { ...merged[ad.id], ...ad, last_seen_iso: nowIso };
+      } else {
+        merged[ad.id] = { ...ad, first_seen_iso: nowIso, last_seen_iso: nowIso };
+        newCount += 1;
+      }
+    }
+    await saveCreatives(target.id, merged);
+    await saveWeeklySnapshot(target.id, isoWeek(), ads.map((a) => a.id));
+
+    res.json({
+      id: target.id,
+      name: target.name,
+      total_ads: ads.length,
+      new_ads: newCount,
+      week: isoWeek(),
+      url,
+      tookMs,
+      total_tookMs: Date.now() - startedAt,
+    });
+  } catch (err) {
+    const msg = err.message || String(err);
+    await logError({
+      page_id: target.id,
+      name: target.name,
+      stage: 'scrape_creatives',
+      error: msg,
+      took_ms: Date.now() - startedAt,
+    });
+    res.status(500).json({
+      stage: 'scrape_creatives',
+      id: target.id,
+      name: target.name,
+      error: msg,
+      tookMs: Date.now() - startedAt,
+    });
+  }
+});
+
+// Build the weekly competitor-intelligence report. Aggregates per-target
+// creative snapshots, asks the configured AI provider to narrate, returns
+// stats + HTML body. Designed to be called from a workflow which then
+// emails the body. Token-guarded.
+app.post('/api/admin/weekly-report', express.json({ limit: '1mb' }), async (req, res) => {
+  const adminToken = process.env.ADMIN_TOKEN;
+  if (!adminToken) return res.status(500).json({ error: 'ADMIN_TOKEN env var not configured.' });
+  const provided = req.query.token || (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+  if (provided !== adminToken) return res.status(403).json({ error: 'Bad or missing token.' });
+
+  const { generateReport } = require('./lib/report');
+  try {
+    const opts = {};
+    if (req.query.this_week) opts.thisWeek = req.query.this_week;
+    if (req.query.last_week) opts.lastWeek = req.query.last_week;
+    if (req.body && Array.isArray(req.body.landing_diffs)) opts.landingDiffs = req.body.landing_diffs;
+    const out = await generateReport(opts);
+    res.json({ ok: true, ...out });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// Full daily snapshot history for a single target. Used by the dashboard
+// "history" modal to plot every recorded count point since the target was
+// added.
+app.get('/api/history', async (req, res) => {
+  const id = (req.query.id || '').toString().trim();
+  if (!id) return res.status(400).json({ error: 'Missing ?id=<page_id>' });
+  const target = TARGETS.find((t) => t.id === id);
+  if (!target) return res.status(404).json({ error: `Unknown target id: ${id}` });
+  try {
+    const history = await getHistory(target.id);
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({ id: target.id, name: target.name, history });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Public read of the most recent weekly report (cached by the workflow
+// when it runs). Returns null if no report has ever been generated.
+app.get('/api/weekly-report', async (req, res) => {
+  const { getLatestWeeklyReport } = require('./lib/storage');
+  try {
+    const report = await getLatestWeeklyReport();
+    res.setHeader('Cache-Control', 'no-store');
+    res.json(report || { ok: false, error: 'No weekly report yet — workflow has not produced one.' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Same digest data as weekly-report but without the AI call. Used by the
+// workflow before screenshotting so it knows which landing URLs are new.
+app.get('/api/admin/digest', async (req, res) => {
+  const adminToken = process.env.ADMIN_TOKEN;
+  if (!adminToken) return res.status(500).json({ error: 'ADMIN_TOKEN env var not configured.' });
+  const provided = req.query.token || (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+  if (provided !== adminToken) return res.status(403).json({ error: 'Bad or missing token.' });
+
+  const { buildDigest } = require('./lib/report');
+  try {
+    const opts = {};
+    if (req.query.this_week) opts.thisWeek = req.query.this_week;
+    if (req.query.last_week) opts.lastWeek = req.query.last_week;
+    const digest = await buildDigest(opts);
+    res.json({ ok: true, ...digest });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// Screenshot a landing URL on the Render host (which has Puppeteer +
+// Chromium) and return base64 PNG. The workflow uses this to capture
+// landing pages without installing Chromium in the runner.
+app.post('/api/admin/screenshot', async (req, res) => {
+  const adminToken = process.env.ADMIN_TOKEN;
+  if (!adminToken) return res.status(500).json({ error: 'ADMIN_TOKEN env var not configured.' });
+  const provided = req.query.token || (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+  if (provided !== adminToken) return res.status(403).json({ error: 'Bad or missing token.' });
+
+  const url = (req.query.url || '').toString();
+  if (!url || !/^https?:\/\//.test(url)) return res.status(400).json({ error: 'Missing or invalid ?url=' });
+
+  const startedAt = Date.now();
+  try {
+    const buf = await screenshotUrl(url);
+    res.json({ ok: true, url, base64: buf.toString('base64'), bytes: buf.length, tookMs: Date.now() - startedAt });
+  } catch (err) {
+    res.status(500).json({ ok: false, url, error: err.message, tookMs: Date.now() - startedAt });
+  }
+});
+
+// Smoke-test endpoint for the AI provider switcher. Token-protected because
+// it consumes upstream quota. Available in any environment that has
+// ADMIN_TOKEN + GEMINI_API_KEY (or other provider key) configured.
+app.post('/api/admin/ai-test', async (req, res) => {
+  const adminToken = process.env.ADMIN_TOKEN;
+  if (!adminToken) return res.status(500).json({ error: 'ADMIN_TOKEN env var not configured.' });
+  const provided = req.query.token || (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+  if (provided !== adminToken) return res.status(403).json({ error: 'Bad or missing token.' });
+
+  const ai = require('./lib/ai');
+  const prompt = req.query.prompt || 'In one short sentence, say hello and confirm you are working.';
+
+  try {
+    const out = await ai.chat(prompt, { maxTokens: 200 });
+    res.json({ ok: true, provider: out.provider, model: out.model, prompt, response: out.text, usage: out.usage });
+  } catch (err) {
+    res.status(500).json({ ok: false, provider: ai.provider(), error: err.message });
   }
 });
 
