@@ -167,38 +167,7 @@ jobs:
             exit 0
           fi
 
-          {
-            echo "have_report=true"
-            echo "week=$WEEK"
-            echo "new_total=$NEW_TOTAL"
-            echo "subject=[FB Ads Staging] 週報 $WEEK — 新增 $NEW_TOTAL 個廣告，$MOST_NEW_NAME 最活躍 (+$MOST_NEW_COUNT)"
-          } >> "$GITHUB_OUTPUT"
-
-      - name: Check email secrets
-        id: check_email
-        env:
-          G_USER: ${{ secrets.GMAIL_USER }}
-          G_PASS: ${{ secrets.GMAIL_APP_PASSWORD }}
-          G_TO: ${{ secrets.ALERT_EMAIL }}
-        run: |
-          if [ -n "$G_USER" ] && [ -n "$G_PASS" ] && [ -n "$G_TO" ]; then
-            echo "ready=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "ready=false" >> "$GITHUB_OUTPUT"
-            echo "Skipping email — one of GMAIL_USER / GMAIL_APP_PASSWORD / ALERT_EMAIL secrets is missing."
-          fi
-
-      - name: Send weekly report email
-        if: steps.report.outputs.have_report == 'true' && steps.check_email.outputs.ready == 'true'
-        uses: dawidd6/action-send-mail@v3
-        with:
-          server_address: smtp.gmail.com
-          server_port: 465
-          secure: true
-          username: ${{ secrets.GMAIL_USER }}
-          password: ${{ secrets.GMAIL_APP_PASSWORD }}
-          from: FB Ads Monitor <${{ secrets.GMAIL_USER }}>
-          to: ${{ secrets.ALERT_EMAIL }}
-          subject: ${{ steps.report.outputs.subject }}
-          html_body: file:///tmp/report/body.html
-          convert_markdown: false
+          echo "have_report=true" >> "$GITHUB_OUTPUT"
+          echo "week=$WEEK" >> "$GITHUB_OUTPUT"
+          echo "new_total=$NEW_TOTAL" >> "$GITHUB_OUTPUT"
+          echo "Report cached server-side; visit the dashboard to view."
