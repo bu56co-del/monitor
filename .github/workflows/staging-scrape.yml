@@ -29,7 +29,7 @@ jobs:
         env:
           RENDER_URL: ${{ secrets.STAGING_RENDER_URL }}
         run: |
-          # All 13 targets (same order as lib/targets.js)
+          # All 15 targets (same order as lib/targets.js)
           TARGETS=(
             "110379081699089|HKMPM (original)"
             "89863844963|NYMG"
@@ -44,6 +44,8 @@ jobs:
             "101464375049675|菁森日本理療所"
             "107468998477970|Perle signature"
             "111895960717990|Me Paincare"
+            "1059523747239272|痛症聯盟 Pain Alliance"
+            "810698912118269|Dr.Cure"
           )
 
           OK=0

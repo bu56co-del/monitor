@@ -1,15 +1,18 @@
-name: Staging — Weekly creatives + report (manual)
+name: Staging — Weekly creatives + report
 
-# Manual-trigger only on staging. Validates the weekly creative scraper,
-# landing-page screenshot diff, and AI report end-to-end against the
-# staging Render service before we wire this up on production.
+# Runs every Sunday HKT 23:00 (= UTC 15:00) so it captures the full
+# week's data before the week boundary rolls over. Manual trigger
+# (workflow_dispatch) is also available for testing.
 on:
+  schedule:
+    # Sunday HKT 23:00 = Sunday UTC 15:00
+    - cron: "0 15 * * 0"
   workflow_dispatch:
     inputs:
       max_ads_per_target:
         description: 'Max ads to capture per target'
         required: false
-        default: '50'
+        default: '1000'
 
 permissions:
   contents: write   # so the workflow can commit baseline screenshots back
@@ -50,7 +53,7 @@ jobs:
       - name: Scrape creatives for all 13 targets
         env:
           RENDER_URL: ${{ secrets.STAGING_RENDER_URL }}
-          MAX_ADS: ${{ github.event.inputs.max_ads_per_target || '50' }}
+          MAX_ADS: ${{ github.event.inputs.max_ads_per_target || '1000' }}
         run: |
           TARGETS=(
             "110379081699089|HKMPM (original)"
@@ -66,6 +69,8 @@ jobs:
             "101464375049675|菁森日本理療所"
             "107468998477970|Perle signature"
             "111895960717990|Me Paincare"
+            "1059523747239272|痛症聯盟 Pain Alliance"
+            "810698912118269|Dr.Cure"
           )
 
           OK=0
@@ -156,49 +161,10 @@ jobs:
           fi
 
           WEEK=$(jq -r '.week // "?"' /tmp/report/report.json)
-          NEW_TOTAL=$(jq -r '.stats.new_total // 0' /tmp/report/report.json)
-          MOST_NEW_NAME=$(jq -r '.stats.most_new.name // "—"' /tmp/report/report.json)
-          MOST_NEW_COUNT=$(jq -r '.stats.most_new.count // 0' /tmp/report/report.json)
-
-          jq -r '.html // ""' /tmp/report/report.json > /tmp/report/body.html
-          if [ ! -s /tmp/report/body.html ]; then
-            echo "AI returned empty body."
-            echo "have_report=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          {
-            echo "have_report=true"
-            echo "week=$WEEK"
-            echo "new_total=$NEW_TOTAL"
-            echo "subject=[FB Ads Staging] 週報 $WEEK — 新增 $NEW_TOTAL 個廣告，$MOST_NEW_NAME 最活躍 (+$MOST_NEW_COUNT)"
-          } >> "$GITHUB_OUTPUT"
-
-      - name: Check email secrets
-        id: check_email
-        env:
-          G_USER: ${{ secrets.GMAIL_USER }}
-          G_PASS: ${{ secrets.GMAIL_APP_PASSWORD }}
-          G_TO: ${{ secrets.ALERT_EMAIL }}
-        run: |
-          if [ -n "$G_USER" ] && [ -n "$G_PASS" ] && [ -n "$G_TO" ]; then
-            echo "ready=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "ready=false" >> "$GITHUB_OUTPUT"
-            echo "Skipping email — one of GMAIL_USER / GMAIL_APP_PASSWORD / ALERT_EMAIL secrets is missing."
-          fi
-
-      - name: Send weekly report email
-        if: steps.report.outputs.have_report == 'true' && steps.check_email.outputs.ready == 'true'
-        uses: dawidd6/action-send-mail@v3
-        with:
-          server_address: smtp.gmail.com
-          server_port: 465
-          secure: true
-          username: ${{ secrets.GMAIL_USER }}
-          password: ${{ secrets.GMAIL_APP_PASSWORD }}
-          from: FB Ads Monitor <${{ secrets.GMAIL_USER }}>
-          to: ${{ secrets.ALERT_EMAIL }}
-          subject: ${{ steps.report.outputs.subject }}
-          html_body: file:///tmp/report/body.html
-          convert_markdown: false
+          BIG_GAIN=$(jq -r '"\(.stats.biggest_gain.name) (+\(.stats.biggest_gain.delta))"' /tmp/report/report.json)
+          BIG_DROP=$(jq -r '"\(.stats.biggest_drop.name) (\(.stats.biggest_drop.delta))"' /tmp/report/report.json)
+          echo "Week: $WEEK"
+          echo "Biggest gain: $BIG_GAIN"
+          echo "Biggest drop: $BIG_DROP"
+          echo "have_report=true" >> "$GITHUB_OUTPUT"
+          echo "Report cached server-side; visit the dashboard to view."
