@@ -318,9 +318,12 @@
 </div>
 
 <div class="card" id="weekly-card">
-  <h2>📊 Weekly competitor report</h2>
-  <div id="weekly-meta" style="font-size:0.78rem;color:#666;margin-bottom:0.85rem">Loading…</div>
-  <div id="weekly-body" style="font-size:0.92rem;line-height:1.55;color:#d8d8d8"></div>
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem;gap:1rem;flex-wrap:wrap">
+    <h2 style="margin:0">📊 Weekly competitor report</h2>
+    <button id="regen-weekly" title="Re-run AI on the latest creatives in storage (~30 seconds)">🔄 Regenerate now</button>
+  </div>
+  <div id="weekly-meta">Loading…</div>
+  <div id="weekly-body"></div>
 </div>
 
 <div class="card">
@@ -633,6 +636,39 @@
     }
   }
 
+  async function regenerateWeeklyReport(btn) {
+    let token = localStorage.getItem('admin_token') || '';
+    if (!token) {
+      token = (prompt('輸入 ADMIN_TOKEN（淨係儲喺你部機 localStorage，唔會 send 出去）') || '').trim();
+      if (!token) return;
+      localStorage.setItem('admin_token', token);
+    }
+    const original = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = '… AI 分析中（~30 秒）';
+    try {
+      const res = await fetch('/api/admin/weekly-report?token=' + encodeURIComponent(token), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ landing_diffs: [] }),
+      });
+      const data = await res.json();
+      if (!res.ok || data.ok === false) {
+        if (res.status === 403) localStorage.removeItem('admin_token');
+        throw new Error(data.error || ('HTTP ' + res.status));
+      }
+      await loadWeeklyReport();
+      btn.textContent = '✓ 已更新';
+      setTimeout(() => { btn.textContent = original; }, 2500);
+    } catch (e) {
+      alert('Regenerate failed: ' + e.message);
+      btn.textContent = original;
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  document.getElementById('regen-weekly').addEventListener('click', (e) => regenerateWeeklyReport(e.currentTarget));
   document.getElementById('refresh').addEventListener('click', () => { load(); loadWeeklyReport(); });
   document.getElementById('rows').addEventListener('click', (e) => {
     const histBtn = e.target.closest('.history-btn');
