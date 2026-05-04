@@ -29,6 +29,7 @@ jobs:
       - name: Scrape all targets one by one
         env:
           RENDER_URL: ${{ secrets.RENDER_URL }}
+          ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
         run: |
           # All 15 targets (same order as lib/targets.js)
           TARGETS=(
@@ -60,7 +61,7 @@ jobs:
 
             # 2 minute timeout per target — skip if stuck
             if curl -X POST --fail --show-error --max-time 120 \
-              "${RENDER_URL%/}/api/trigger?id=${ID}" 2>&1; then
+              "${RENDER_URL%/}/api/trigger?id=${ID}&token=${ADMIN_TOKEN}" 2>&1; then
               echo ""
               echo ">>> OK"
               OK=$((OK + 1))

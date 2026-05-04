@@ -84,6 +84,91 @@ function computeDiffs(history) {
 // --- Express server ----------------------------------------------------
 
 const app = express();
+
+// --- Auth (no-op if DASHBOARD_PASSWORD is unset) ----------------------
+const {
+  requireAuth,
+  issueSession,
+  setSessionCookie,
+  clearSessionCookie,
+  parseCookie,
+  verifySession,
+  COOKIE_NAME,
+  timingSafeEqual,
+} = require('./lib/auth');
+
+// Public routes (no auth gate). Defined BEFORE the auth middleware so
+// the login page itself remains reachable when locked out.
+app.get('/login', (req, res) => {
+  // Already logged in? Bounce home.
+  if (verifySession(parseCookie(req, COOKIE_NAME))) return res.redirect('/');
+  const error = req.query.error === '1' ? 'Wrong password.' : '';
+  const next = req.query.next ? String(req.query.next) : '/';
+  const safeNext = next.startsWith('/') ? next : '/';
+  res.setHeader('Cache-Control', 'no-store');
+  res.send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Login · FB Ads Monitor</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: #0d0d0d; color: #e8e8e8; min-height: 100vh; margin: 0;
+    display: flex; align-items: center; justify-content: center; padding: 1rem; }
+  .login-card { background: #161616; border: 1px solid #222; border-radius: 14px;
+    padding: 2rem; max-width: 380px; width: 100%; }
+  h1 { font-size: 0.85rem; font-weight: 600; letter-spacing: 0.08em;
+    text-transform: uppercase; color: #888; margin: 0 0 1.5rem; }
+  label { display: block; font-size: 0.72rem; color: #777;
+    text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 0.4rem; }
+  input[type=password] { width: 100%; padding: 0.7rem 0.9rem;
+    background: #0a0a0a; border: 1px solid #333; border-radius: 8px;
+    color: #fff; font-size: 0.95rem; font-family: inherit; outline: none; }
+  input[type=password]:focus { border-color: #4a5; }
+  button { width: 100%; margin-top: 1rem; padding: 0.7rem;
+    background: #1a2a1a; border: 1px solid #4a5; border-radius: 8px;
+    color: #cfd; font-size: 0.9rem; cursor: pointer; font-family: inherit; }
+  button:hover { background: #233823; }
+  .err { color: #f87171; font-size: 0.78rem; margin-top: 0.8rem; }
+</style>
+</head>
+<body>
+<form class="login-card" method="POST" action="/auth/login">
+  <h1>FB Ads Monitor</h1>
+  <label for="pw">Password</label>
+  <input id="pw" type="password" name="password" autofocus required autocomplete="current-password" />
+  <input type="hidden" name="next" value="${safeNext.replace(/"/g, '&quot;')}" />
+  <button type="submit">Sign in</button>
+  ${error ? `<div class="err">${error}</div>` : ''}
+</form>
+</body>
+</html>`);
+});
+
+app.post('/auth/login', express.urlencoded({ extended: false }), (req, res) => {
+  const expected = process.env.DASHBOARD_PASSWORD;
+  if (!expected) return res.status(500).send('DASHBOARD_PASSWORD not configured');
+  const provided = (req.body && req.body.password) || '';
+  if (!timingSafeEqual(provided, expected)) {
+    const next = (req.body && req.body.next) || '/';
+    return res.redirect(`/login?error=1&next=${encodeURIComponent(next)}`);
+  }
+  const session = issueSession();
+  if (!session) return res.status(500).send('Failed to issue session');
+  setSessionCookie(res, session);
+  const next = (req.body && req.body.next) || '/';
+  res.redirect(next.startsWith('/') ? next : '/');
+});
+
+app.post('/auth/logout', (req, res) => {
+  clearSessionCookie(res);
+  res.redirect('/login');
+});
+
+// Apply the auth gate to everything below — static dashboard files + API.
+app.use(requireAuth);
+
 app.use(express.static(path.join(__dirname, 'public')));
 
 app.get('/api/data', async (req, res) => {
