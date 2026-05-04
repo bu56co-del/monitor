@@ -260,6 +260,23 @@ app.post('/api/admin/weekly-report', express.json({ limit: '1mb' }), async (req,
   }
 });
 
+// Full daily snapshot history for a single target. Used by the dashboard
+// "history" modal to plot every recorded count point since the target was
+// added.
+app.get('/api/history', async (req, res) => {
+  const id = (req.query.id || '').toString().trim();
+  if (!id) return res.status(400).json({ error: 'Missing ?id=<page_id>' });
+  const target = TARGETS.find((t) => t.id === id);
+  if (!target) return res.status(404).json({ error: `Unknown target id: ${id}` });
+  try {
+    const history = await getHistory(target.id);
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({ id: target.id, name: target.name, history });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Public read of the most recent weekly report (cached by the workflow
 // when it runs). Returns null if no report has ever been generated.
 app.get('/api/weekly-report', async (req, res) => {
