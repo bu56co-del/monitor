@@ -557,11 +557,18 @@
       }
       const stats = data.stats || {};
       const generatedAt = data.generated_at ? new Date(data.generated_at).toLocaleString() : '—';
+      const fmtDelta = (d) => {
+        if (!d || d.delta === undefined || d.delta === 0) return '—';
+        const sign = d.delta > 0 ? '+' : '';
+        return `${d.name} (${sign}${d.delta})`;
+      };
       meta.innerHTML =
         `Week ${data.week || '?'} &nbsp;·&nbsp; ` +
-        `New ads: <strong>${stats.new_total ?? '?'}</strong> &nbsp;·&nbsp; ` +
-        `Removed: <strong>${stats.removed_total ?? '?'}</strong> &nbsp;·&nbsp; ` +
-        `Most active: <strong>${stats.most_new?.name ?? '—'}</strong> (+${stats.most_new?.count ?? 0}) &nbsp;·&nbsp; ` +
+        `Targets: <strong>${stats.targets ?? '?'}</strong> &nbsp;·&nbsp; ` +
+        `New ads (rotation): <strong>${stats.new_ad_ids_total ?? '?'}</strong> &nbsp;·&nbsp; ` +
+        `Dropped: <strong>${stats.removed_ad_ids_total ?? '?'}</strong> &nbsp;·&nbsp; ` +
+        `Biggest gain: <strong>${fmtDelta(stats.biggest_gain)}</strong> &nbsp;·&nbsp; ` +
+        `Biggest drop: <strong>${fmtDelta(stats.biggest_drop)}</strong> &nbsp;·&nbsp; ` +
         `Generated ${generatedAt}`;
       body.innerHTML = data.html;
     } catch (e) {

@@ -156,18 +156,10 @@ jobs:
           fi
 
           WEEK=$(jq -r '.week // "?"' /tmp/report/report.json)
-          NEW_TOTAL=$(jq -r '.stats.new_total // 0' /tmp/report/report.json)
-          MOST_NEW_NAME=$(jq -r '.stats.most_new.name // "—"' /tmp/report/report.json)
-          MOST_NEW_COUNT=$(jq -r '.stats.most_new.count // 0' /tmp/report/report.json)
-
-          jq -r '.html // ""' /tmp/report/report.json > /tmp/report/body.html
-          if [ ! -s /tmp/report/body.html ]; then
-            echo "AI returned empty body."
-            echo "have_report=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
+          BIG_GAIN=$(jq -r '"\(.stats.biggest_gain.name) (+\(.stats.biggest_gain.delta))"' /tmp/report/report.json)
+          BIG_DROP=$(jq -r '"\(.stats.biggest_drop.name) (\(.stats.biggest_drop.delta))"' /tmp/report/report.json)
+          echo "Week: $WEEK"
+          echo "Biggest gain: $BIG_GAIN"
+          echo "Biggest drop: $BIG_DROP"
           echo "have_report=true" >> "$GITHUB_OUTPUT"
-          echo "week=$WEEK" >> "$GITHUB_OUTPUT"
-          echo "new_total=$NEW_TOTAL" >> "$GITHUB_OUTPUT"
           echo "Report cached server-side; visit the dashboard to view."
