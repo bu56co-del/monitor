@@ -637,24 +637,17 @@
   }
 
   async function regenerateWeeklyReport(btn) {
-    let token = localStorage.getItem('admin_token') || '';
-    if (!token) {
-      token = (prompt('輸入 ADMIN_TOKEN（淨係儲喺你部機 localStorage，唔會 send 出去）') || '').trim();
-      if (!token) return;
-      localStorage.setItem('admin_token', token);
-    }
     const original = btn.textContent;
     btn.disabled = true;
     btn.textContent = '… AI 分析中（~30 秒）';
     try {
-      const res = await fetch('/api/admin/weekly-report?token=' + encodeURIComponent(token), {
+      const res = await fetch('/api/weekly-report/regenerate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ landing_diffs: [] }),
       });
       const data = await res.json();
       if (!res.ok || data.ok === false) {
-        if (res.status === 403) localStorage.removeItem('admin_token');
         throw new Error(data.error || ('HTTP ' + res.status));
       }
       await loadWeeklyReport();

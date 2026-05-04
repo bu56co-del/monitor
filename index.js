@@ -290,6 +290,23 @@ app.get('/api/weekly-report', async (req, res) => {
   }
 });
 
+// Public regenerate — re-runs the AI against creatives already in storage
+// (no re-scrape) and updates weekly_report:latest. Open by design so the
+// dashboard's "🔄 Regenerate now" button works without prompting for a
+// token; trade-off is anyone with the URL can burn Gemini quota. The full
+// /api/admin/weekly-report sibling stays token-guarded for the workflow.
+app.post('/api/weekly-report/regenerate', express.json({ limit: '1mb' }), async (req, res) => {
+  const { generateReport } = require('./lib/report');
+  try {
+    const opts = {};
+    if (req.body && Array.isArray(req.body.landing_diffs)) opts.landingDiffs = req.body.landing_diffs;
+    const out = await generateReport(opts);
+    res.json({ ok: true, ...out });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // Same digest data as weekly-report but without the AI call. Used by the
 // workflow before screenshotting so it knows which landing URLs are new.
 app.get('/api/admin/digest', async (req, res) => {
