@@ -1,9 +1,12 @@
-name: Staging — Weekly creatives + report (manual)
+name: Staging — Weekly creatives + report
 
-# Manual-trigger only on staging. Validates the weekly creative scraper,
-# landing-page screenshot diff, and AI report end-to-end against the
-# staging Render service before we wire this up on production.
+# Runs every Sunday HKT 23:00 (= UTC 15:00) so it captures the full
+# week's data before the week boundary rolls over. Manual trigger
+# (workflow_dispatch) is also available for testing.
 on:
+  schedule:
+    # Sunday HKT 23:00 = Sunday UTC 15:00
+    - cron: "0 15 * * 0"
   workflow_dispatch:
     inputs:
       max_ads_per_target:

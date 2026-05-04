@@ -134,6 +134,62 @@
     .flash { color: #4ade80; font-size: 0.75rem; margin-left: 0.5rem; }
     .flash.err { color: #f87171; }
 
+    /* Weekly report card body — give the AI-rendered HTML proper hierarchy */
+    #weekly-meta {
+      font-size: 0.78rem;
+      color: #777;
+      margin-bottom: 1rem;
+      line-height: 1.7;
+    }
+    #weekly-meta strong { color: #cfcfcf; font-weight: 600; }
+    #weekly-body {
+      font-size: 0.9rem;
+      line-height: 1.65;
+      color: #d8d8d8;
+    }
+    #weekly-body h3 {
+      font-size: 0.86rem;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      color: #fff;
+      margin: 1.6rem 0 0.7rem;
+      padding-bottom: 0.45rem;
+      border-bottom: 1px solid #2a2a2a;
+    }
+    #weekly-body h3:first-child { margin-top: 0; }
+    #weekly-body h4 {
+      font-size: 0.83rem;
+      font-weight: 600;
+      color: #cfd;
+      margin: 1.1rem 0 0.4rem;
+      padding: 0.5rem 0.75rem;
+      background: #181d18;
+      border-left: 3px solid #4a5;
+      border-radius: 4px;
+    }
+    #weekly-body ul {
+      margin: 0.3rem 0 0.8rem 0;
+      padding-left: 1.4rem;
+      list-style: none;
+    }
+    #weekly-body li {
+      position: relative;
+      margin: 0.35rem 0;
+      padding-left: 0.2rem;
+    }
+    #weekly-body li::before {
+      content: '·';
+      position: absolute;
+      left: -0.9rem;
+      top: -0.05rem;
+      color: #555;
+      font-weight: 700;
+    }
+    #weekly-body strong { color: #f5f5f5; font-weight: 600; }
+    #weekly-body p { margin: 0.5rem 0; }
+    /* Highlight the rotation/total-change paired bullets the AI emits */
+    #weekly-body h4 + ul li:first-child::before { color: #4ade80; }
+
     /* History modal */
     .modal {
       position: fixed;
