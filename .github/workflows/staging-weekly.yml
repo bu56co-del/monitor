@@ -9,7 +9,7 @@ on:
       max_ads_per_target:
         description: 'Max ads to capture per target'
         required: false
-        default: '200'
+        default: '1000'
 
 permissions:
   contents: write   # so the workflow can commit baseline screenshots back
@@ -50,7 +50,7 @@ jobs:
       - name: Scrape creatives for all 13 targets
         env:
           RENDER_URL: ${{ secrets.STAGING_RENDER_URL }}
-          MAX_ADS: ${{ github.event.inputs.max_ads_per_target || '200' }}
+          MAX_ADS: ${{ github.event.inputs.max_ads_per_target || '1000' }}
         run: |
           TARGETS=(
             "110379081699089|HKMPM (original)"
