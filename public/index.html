@@ -457,6 +457,11 @@
 
   async function fetchData() {
     const res = await fetch(`/api/data?t=${Date.now()}`, { cache: 'no-store' });
+    if (res.status === 401) {
+      // Session expired — bounce to login.
+      window.location.href = '/login?next=' + encodeURIComponent(window.location.pathname);
+      return new Promise(() => {});
+    }
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return res.json();
   }
