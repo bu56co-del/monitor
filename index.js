@@ -385,6 +385,9 @@ app.post('/api/weekly-report/regenerate', express.json({ limit: '1mb' }), async 
   try {
     const opts = {};
     if (req.body && Array.isArray(req.body.landing_diffs)) opts.landingDiffs = req.body.landing_diffs;
+    // Optional ?provider= overrides AI_PROVIDER for this call — lets the
+    // dashboard have a backup button that uses a different provider.
+    if (req.query.provider) opts.provider = String(req.query.provider).toLowerCase();
     const out = await generateReport(opts);
     res.json({ ok: true, ...out });
   } catch (err) {
