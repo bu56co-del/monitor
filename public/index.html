@@ -321,6 +321,7 @@
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem;gap:1rem;flex-wrap:wrap">
     <h2 style="margin:0">📊 Weekly competitor report</h2>
     <button id="regen-weekly" title="Re-run AI on the latest creatives in storage (~30 seconds)">🔄 Regenerate now</button>
+    <button id="regen-weekly-banana" title="Fallback when Gemini is blocked — runs the report through Banana2556 (claude-haiku-4.5-as)">🍌 Regenerate via Banana2556</button>
   </div>
   <div id="weekly-meta">Loading…</div>
   <div id="weekly-body"></div>
@@ -641,12 +642,13 @@
     }
   }
 
-  async function regenerateWeeklyReport(btn) {
+  async function regenerateWeeklyReport(btn, provider) {
     const original = btn.textContent;
     btn.disabled = true;
     btn.textContent = '… AI 分析中（~30 秒）';
     try {
-      const res = await fetch('/api/weekly-report/regenerate', {
+      const qs = provider ? `?provider=${encodeURIComponent(provider)}` : '';
+      const res = await fetch('/api/weekly-report/regenerate' + qs, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ landing_diffs: [] }),
@@ -667,6 +669,7 @@
   }
 
   document.getElementById('regen-weekly').addEventListener('click', (e) => regenerateWeeklyReport(e.currentTarget));
+  document.getElementById('regen-weekly-banana').addEventListener('click', (e) => regenerateWeeklyReport(e.currentTarget, 'banana2556'));
   document.getElementById('refresh').addEventListener('click', () => { load(); loadWeeklyReport(); });
   document.getElementById('rows').addEventListener('click', (e) => {
     const histBtn = e.target.closest('.history-btn');
