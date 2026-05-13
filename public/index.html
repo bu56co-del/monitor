@@ -276,6 +276,84 @@
     .history-table .delta-down { color: #f87171; }
     .history-table .delta-zero { color: #555; }
 
+    /* Captured-ads modal */
+    .ad-card {
+      display: grid;
+      grid-template-columns: 80px 1fr;
+      gap: 0.9rem;
+      padding: 0.85rem;
+      background: #0d0d0d;
+      border: 1px solid #1f1f1f;
+      border-radius: 8px;
+      margin-bottom: 0.6rem;
+    }
+    .ad-card.is-new { border-color: #4a5; background: #0e120e; }
+    .ad-thumb {
+      width: 80px;
+      height: 80px;
+      background: #1a1a1a;
+      border-radius: 4px;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .ad-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .ad-thumb .placeholder { color: #444; font-size: 0.7rem; }
+    .ad-card-body { min-width: 0; font-size: 0.82rem; line-height: 1.5; color: #ccc; }
+    .ad-card-head {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.6rem;
+      font-size: 0.7rem;
+      color: #666;
+      margin-bottom: 0.35rem;
+      font-family: ui-monospace, monospace;
+    }
+    .ad-card-head .badge {
+      padding: 0.05rem 0.45rem;
+      background: #1a2a1a;
+      color: #cfd;
+      border: 1px solid #4a5;
+      border-radius: 4px;
+      font-size: 0.68rem;
+      font-family: inherit;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+    .ad-card-head a { color: #888; text-decoration: none; }
+    .ad-card-head a:hover { color: #cfd; text-decoration: underline; }
+    .ad-card-text { color: #d8d8d8; word-break: break-word; white-space: pre-wrap; max-height: 4.5em; overflow: hidden; transition: max-height 0.2s; }
+    .ad-card-text.expanded { max-height: none; }
+    .ad-card-foot {
+      margin-top: 0.5rem;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.6rem 1rem;
+      font-size: 0.74rem;
+      color: #777;
+    }
+    .ad-card-foot a { color: #8aa; text-decoration: none; border-bottom: 1px dotted #444; }
+    .ad-card-foot a:hover { color: #cfd; }
+    .ad-card-expand {
+      background: none;
+      border: none;
+      color: #666;
+      font-size: 0.72rem;
+      padding: 0;
+      margin-top: 0.2rem;
+      cursor: pointer;
+    }
+    .ad-card-expand:hover { color: #cfd; }
+    #ads-list:empty::before {
+      content: 'No ads captured yet for this target. Run the weekly workflow first.';
+      display: block;
+      color: #555;
+      text-align: center;
+      padding: 1.5rem;
+      font-size: 0.85rem;
+    }
+
     footer {
       margin-top: 2rem;
       font-size: 0.72rem;
@@ -362,6 +440,23 @@
   </div>
 </div>
 
+<div id="ads-modal" class="modal hidden" role="dialog" aria-modal="true">
+  <div class="modal-content" style="max-width:880px">
+    <div class="modal-header">
+      <div>
+        <h3 id="ads-title">Captured ads</h3>
+        <div class="meta" id="ads-meta"></div>
+      </div>
+      <button class="modal-close" id="ads-close" aria-label="Close">✕</button>
+    </div>
+    <div class="modal-body">
+      <div id="ads-coverage" style="font-size:0.78rem;color:#888;margin-bottom:0.85rem"></div>
+      <input id="ads-search" type="search" placeholder="Filter by body text, CTA, or ad ID…" style="width:100%;padding:0.5rem 0.75rem;background:#0a0a0a;border:1px solid #333;border-radius:6px;color:#eee;font-size:0.85rem;margin-bottom:0.85rem;font-family:inherit" />
+      <div id="ads-list"></div>
+    </div>
+  </div>
+</div>
+
 <footer>
   Hourly cron HKT 09:30-17:30 (once per target per day) &nbsp;·&nbsp;
   Source: <a href="https://www.facebook.com/ads/library/" target="_blank">Meta Ad Library</a>
@@ -422,8 +517,11 @@
         <td class="num">${fmtDiffCell(diffsByLabel['30D'])}</td>
         <td class="num">${fmtDiffCell(diffsByLabel['60D'])}</td>
         <td class="actions">
-          <button class="history-btn" data-id="${t.id}" data-name="${t.name.replace(/"/g, '&quot;')}" title="View full history">
+          <button class="history-btn" data-id="${t.id}" data-name="${t.name.replace(/"/g, '&quot;')}" title="View full count history">
             📈 History
+          </button>
+          <button class="ads-btn" data-id="${t.id}" data-name="${t.name.replace(/"/g, '&quot;')}" title="View every captured ad creative">
+            📋 Ads
           </button>
           <button class="fetch-btn" data-id="${t.id}" data-name="${t.name.replace(/"/g, '&quot;')}">
             ↻ Fetch now
@@ -609,6 +707,105 @@
     document.getElementById('history-modal').classList.add('hidden');
   }
 
+  // --- Captured-ads modal -----------------------------------------
+  // Cached so the filter input can re-render without re-fetching.
+  let _adsState = { id: null, ads: [], fbTotal: null, fbDate: null };
+
+  function escapeHtml(s) {
+    return (s || '').toString().replace(/[&<>"']/g, (c) => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+    }[c]));
+  }
+
+  function renderAdsList(filter) {
+    const host = document.getElementById('ads-list');
+    const term = (filter || '').trim().toLowerCase();
+    const filtered = term
+      ? _adsState.ads.filter((ad) =>
+          (ad.body || '').toLowerCase().includes(term)
+          || (ad.cta || '').toLowerCase().includes(term)
+          || (ad.ad_id || '').toLowerCase().includes(term))
+      : _adsState.ads;
+
+    if (filtered.length === 0) {
+      host.innerHTML = term
+        ? `<div style="color:#666;text-align:center;padding:1.2rem;font-size:0.85rem">No ads match "${escapeHtml(term)}".</div>`
+        : '';
+      return;
+    }
+
+    const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+    host.innerHTML = filtered.map((ad) => {
+      const firstSeen = ad.first_seen_iso ? new Date(ad.first_seen_iso) : null;
+      const lastSeen = ad.last_seen_iso ? new Date(ad.last_seen_iso) : null;
+      const isNew = firstSeen && firstSeen.getTime() >= sevenDaysAgo;
+      const libUrl = `https://www.facebook.com/ads/library/?id=${encodeURIComponent(ad.ad_id)}`;
+      const body = escapeHtml(ad.body || '').slice(0, 1200);
+      const needsExpand = (ad.body || '').length > 220;
+      const thumb = ad.img
+        ? `<img src="${escapeHtml(ad.img)}" alt="" loading="lazy" referrerpolicy="no-referrer">`
+        : `<span class="placeholder">no image</span>`;
+
+      return `<div class="ad-card${isNew ? ' is-new' : ''}">
+        <div class="ad-thumb">${thumb}</div>
+        <div class="ad-card-body">
+          <div class="ad-card-head">
+            <a href="${libUrl}" target="_blank" rel="noopener" title="Open in FB Ad Library">📌 ${escapeHtml(ad.ad_id)}</a>
+            ${isNew ? '<span class="badge">NEW</span>' : ''}
+            ${ad.started ? `<span>📅 ${escapeHtml(ad.started)}</span>` : ''}
+            ${ad.cta ? `<span>🔘 ${escapeHtml(ad.cta)}</span>` : ''}
+          </div>
+          <div class="ad-card-text${needsExpand ? '' : ' expanded'}" data-full="${escapeHtml(ad.body || '')}">${body || '<em style="color:#555">no body text captured</em>'}</div>
+          ${needsExpand ? '<button class="ad-card-expand" type="button">Show more ▾</button>' : ''}
+          <div class="ad-card-foot">
+            ${ad.link ? `<a href="${escapeHtml(ad.link)}" target="_blank" rel="noopener">↗ Landing page</a>` : ''}
+            ${firstSeen ? `<span>First seen: ${firstSeen.toLocaleDateString()}</span>` : ''}
+            ${lastSeen ? `<span>Last seen: ${lastSeen.toLocaleDateString()}</span>` : ''}
+          </div>
+        </div>
+      </div>`;
+    }).join('');
+  }
+
+  async function openAds(id, name) {
+    const modal = document.getElementById('ads-modal');
+    document.getElementById('ads-title').textContent = name;
+    document.getElementById('ads-meta').textContent = 'Loading…';
+    document.getElementById('ads-coverage').textContent = '';
+    document.getElementById('ads-list').innerHTML = '<div style="color:#555;text-align:center;padding:1.2rem;font-size:0.85rem">Loading…</div>';
+    document.getElementById('ads-search').value = '';
+    _adsState = { id, ads: [], fbTotal: null, fbDate: null };
+    modal.classList.remove('hidden');
+
+    try {
+      const res = await fetch(`/api/creatives?id=${encodeURIComponent(id)}`, { cache: 'no-store' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      _adsState = { id, ads: data.ads || [], fbTotal: data.fb_total, fbDate: data.fb_total_date };
+
+      const captured = data.total_captured || 0;
+      const fbTotal = data.fb_total;
+      document.getElementById('ads-meta').textContent = `${captured} captured ads`;
+
+      if (fbTotal !== null && fbTotal !== undefined) {
+        const pct = captured && fbTotal > 0 ? Math.round((captured / fbTotal) * 100) : null;
+        const okIcon = captured >= fbTotal ? '✓' : pct !== null && pct >= 95 ? '≈' : '⚠';
+        const coverageEl = document.getElementById('ads-coverage');
+        coverageEl.innerHTML = `<strong>Coverage</strong>: captured ${captured} ads vs FB-reported ${fbTotal}${data.fb_total_date ? ` (as of ${data.fb_total_date})` : ''} — ${okIcon} ${pct !== null ? pct + '%' : ''}`;
+        coverageEl.style.color = captured >= fbTotal ? '#4ade80' : pct !== null && pct >= 95 ? '#aaa' : '#f87171';
+      }
+
+      renderAdsList('');
+    } catch (e) {
+      document.getElementById('ads-meta').textContent = 'Failed: ' + e.message;
+      document.getElementById('ads-list').innerHTML = '';
+    }
+  }
+
+  function closeAds() {
+    document.getElementById('ads-modal').classList.add('hidden');
+  }
+
   async function loadWeeklyReport() {
     const meta = document.getElementById('weekly-meta');
     const body = document.getElementById('weekly-body');
@@ -677,6 +874,11 @@
       openHistory(histBtn.dataset.id, histBtn.dataset.name);
       return;
     }
+    const adsBtn = e.target.closest('.ads-btn');
+    if (adsBtn) {
+      openAds(adsBtn.dataset.id, adsBtn.dataset.name);
+      return;
+    }
     const fetchBtn = e.target.closest('.fetch-btn');
     if (fetchBtn) {
       fetchOne(fetchBtn.dataset.id, fetchBtn.dataset.name, fetchBtn);
@@ -684,11 +886,33 @@
   });
   document.getElementById('history-close').addEventListener('click', closeHistory);
   document.getElementById('history-modal').addEventListener('click', (e) => {
-    // Click backdrop to close.
     if (e.target.id === 'history-modal') closeHistory();
   });
+  document.getElementById('ads-close').addEventListener('click', closeAds);
+  document.getElementById('ads-modal').addEventListener('click', (e) => {
+    if (e.target.id === 'ads-modal') closeAds();
+  });
+  document.getElementById('ads-search').addEventListener('input', (e) => {
+    renderAdsList(e.currentTarget.value);
+  });
+  document.getElementById('ads-list').addEventListener('click', (e) => {
+    const btn = e.target.closest('.ad-card-expand');
+    if (!btn) return;
+    const text = btn.previousElementSibling;
+    if (!text) return;
+    const expanded = text.classList.toggle('expanded');
+    if (expanded) {
+      const full = text.getAttribute('data-full') || '';
+      text.textContent = full;
+      btn.textContent = 'Show less ▴';
+    } else {
+      const full = text.getAttribute('data-full') || '';
+      text.textContent = full.slice(0, 220) + (full.length > 220 ? '…' : '');
+      btn.textContent = 'Show more ▾';
+    }
+  });
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') closeHistory();
+    if (e.key === 'Escape') { closeHistory(); closeAds(); }
   });
   load();
   loadWeeklyReport();

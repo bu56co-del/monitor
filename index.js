@@ -272,7 +272,12 @@ app.post('/api/scrape-creatives', async (req, res) => {
   const target = TARGETS.find((t) => t.id === id);
   if (!target) return res.status(404).json({ error: `Unknown target id: ${id}` });
 
-  const max = Math.min(parseInt(req.query.max, 10) || 50, 100);
+  // Server-side max cap. The default-no-query value (200) keeps casual
+  // single-call hits bounded; the upper hard cap (2000) is generous
+  // enough that the weekly workflow's max=1000 passes through. Below
+  // 100 was clipping every target (e.g. Perle ~180 only got 100 ads),
+  // leaving us with incomplete creatives maps.
+  const max = Math.min(parseInt(req.query.max, 10) || 200, 2000);
   const startedAt = Date.now();
   try {
     const { ads, url, tookMs } = await scrapeCreatives(target.id, { max });
@@ -342,6 +347,45 @@ app.post('/api/admin/weekly-report', express.json({ limit: '1mb' }), async (req,
     res.json({ ok: true, ...out });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// Full cumulative creatives map for a single target — every ad we've
+// captured for this page, sorted newest-first by first_seen. Used by the
+// dashboard's "📋 Ads" modal so the user can scan through everything we
+// hold for a competitor and sanity-check coverage. Includes the latest
+// daily count so the UI can show "captured X of Y FB-reported ads".
+app.get('/api/creatives', async (req, res) => {
+  const id = (req.query.id || '').toString().trim();
+  if (!id) return res.status(400).json({ error: 'Missing ?id=<page_id>' });
+  const target = TARGETS.find((t) => t.id === id);
+  if (!target) return res.status(404).json({ error: `Unknown target id: ${id}` });
+
+  try {
+    const [creatives, history] = await Promise.all([
+      getCreatives(target.id),
+      getHistory(target.id),
+    ]);
+    const ads = Object.entries(creatives || {}).map(([adId, ad]) => ({ ad_id: adId, ...ad }));
+    ads.sort((a, b) => {
+      const aSeen = a.first_seen_iso || '';
+      const bSeen = b.first_seen_iso || '';
+      if (aSeen === bSeen) return 0;
+      return aSeen < bSeen ? 1 : -1;
+    });
+    const sortedHist = (history || []).slice().sort((a, b) => (a.date < b.date ? -1 : 1));
+    const latest = sortedHist[sortedHist.length - 1] || null;
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({
+      id: target.id,
+      name: target.name,
+      total_captured: ads.length,
+      fb_total: latest ? latest.count : null,
+      fb_total_date: latest ? latest.date : null,
+      ads,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 
