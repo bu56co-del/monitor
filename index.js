@@ -85,6 +85,11 @@ function computeDiffs(history) {
 
 const app = express();
 
+// Render terminates TLS at its proxy, so the client IP arrives in
+// X-Forwarded-For. Trust one proxy hop so req.ip is the real visitor —
+// needed for the per-IP login throttle below.
+app.set('trust proxy', 1);
+
 // --- Auth (no-op if DASHBOARD_PASSWORD is unset) ----------------------
 const {
   requireAuth,
@@ -95,6 +100,11 @@ const {
   verifySession,
   COOKIE_NAME,
   timingSafeEqual,
+  safeNextPath,
+  isLockedOut,
+  recordFailedLogin,
+  clearLoginAttempts,
+  loginRetryAfterSeconds,
 } = require('./lib/auth');
 
 // Public routes (no auth gate). Defined BEFORE the auth middleware so
@@ -102,9 +112,9 @@ const {
 app.get('/login', (req, res) => {
   // Already logged in? Bounce home.
   if (verifySession(parseCookie(req, COOKIE_NAME))) return res.redirect('/');
-  const error = req.query.error === '1' ? 'Wrong password.' : '';
-  const next = req.query.next ? String(req.query.next) : '/';
-  const safeNext = next.startsWith('/') ? next : '/';
+  const error = req.query.error === '1' ? 'Wrong password.'
+    : req.query.error === 'locked' ? 'Too many attempts. Try again later.' : '';
+  const safeNext = safeNextPath(req.query.next);
   res.setHeader('Cache-Control', 'no-store');
   res.send(`<!DOCTYPE html>
 <html lang="en">
@@ -149,16 +159,26 @@ app.get('/login', (req, res) => {
 app.post('/auth/login', express.urlencoded({ extended: false }), (req, res) => {
   const expected = process.env.DASHBOARD_PASSWORD;
   if (!expected) return res.status(500).send('DASHBOARD_PASSWORD not configured');
+  const ip = req.ip || 'unknown';
+  const next = safeNextPath(req.body && req.body.next);
+
+  // Brute-force throttle: refuse while locked out, regardless of password.
+  if (isLockedOut(ip)) {
+    res.setHeader('Retry-After', String(loginRetryAfterSeconds(ip)));
+    return res.redirect(`/login?error=locked&next=${encodeURIComponent(next)}`);
+  }
+
   const provided = (req.body && req.body.password) || '';
   if (!timingSafeEqual(provided, expected)) {
-    const next = (req.body && req.body.next) || '/';
-    return res.redirect(`/login?error=1&next=${encodeURIComponent(next)}`);
+    recordFailedLogin(ip);
+    const err = isLockedOut(ip) ? 'locked' : '1';
+    return res.redirect(`/login?error=${err}&next=${encodeURIComponent(next)}`);
   }
+  clearLoginAttempts(ip);
   const session = issueSession();
   if (!session) return res.status(500).send('Failed to issue session');
   setSessionCookie(res, session);
-  const next = (req.body && req.body.next) || '/';
-  res.redirect(next.startsWith('/') ? next : '/');
+  res.redirect(next);
 });
 
 app.post('/auth/logout', (req, res) => {
@@ -459,6 +479,39 @@ app.get('/api/admin/digest', async (req, res) => {
   }
 });
 
+// SSRF guard for the screenshot endpoint. Refuses URLs that point at
+// localhost, private, or link-local/metadata addresses so a caller can't
+// make the Render host fetch internal services or cloud metadata
+// (169.254.169.254). The route is already token-gated; this is
+// defence-in-depth. Note: hostnames are checked literally — a public
+// hostname that *resolves* to a private IP (DNS rebinding) is not covered.
+function screenshotUrlBlockReason(rawUrl) {
+  let u;
+  try { u = new URL(rawUrl); } catch { return 'invalid URL'; }
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') return 'only http(s) allowed';
+  const host = u.hostname.toLowerCase().replace(/^\[|\]$/g, '');
+  if (
+    host === 'localhost' || host.endsWith('.localhost') ||
+    host.endsWith('.local') || host.endsWith('.internal') ||
+    host === 'metadata.google.internal'
+  ) return 'host not allowed';
+  if (host === '::1') return 'host not allowed';
+  if (/^(fc|fd)[0-9a-f]{2}:/i.test(host) || /^fe80:/i.test(host)) return 'host not allowed';
+  const m = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (m) {
+    const o = m.slice(1).map(Number);
+    if (o.some((n) => n > 255)) return 'invalid IP';
+    const [a, b] = o;
+    const isPrivate =
+      a === 0 || a === 127 || a === 10 ||
+      (a === 169 && b === 254) ||
+      (a === 172 && b >= 16 && b <= 31) ||
+      (a === 192 && b === 168);
+    if (isPrivate) return 'private IP not allowed';
+  }
+  return null;
+}
+
 // Screenshot a landing URL on the Render host (which has Puppeteer +
 // Chromium) and return base64 PNG. The workflow uses this to capture
 // landing pages without installing Chromium in the runner.
@@ -470,6 +523,8 @@ app.post('/api/admin/screenshot', async (req, res) => {
 
   const url = (req.query.url || '').toString();
   if (!url || !/^https?:\/\//.test(url)) return res.status(400).json({ error: 'Missing or invalid ?url=' });
+  const blockReason = screenshotUrlBlockReason(url);
+  if (blockReason) return res.status(400).json({ error: `URL blocked: ${blockReason}` });
 
   const startedAt = Date.now();
   try {

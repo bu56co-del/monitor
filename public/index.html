@@ -717,6 +717,14 @@
     }[c]));
   }
 
+  // Only allow http(s) URLs through to href/src. Scraped ad links are
+  // attacker-influenced, so this blocks javascript:/data: scheme injection.
+  // Returns an escaped, safe-to-embed string, or '' if not allowed.
+  function safeHref(u) {
+    const s = (u || '').toString().trim();
+    return /^https?:\/\//i.test(s) ? escapeHtml(s) : '';
+  }
+
   function renderAdsList(filter) {
     const host = document.getElementById('ads-list');
     const term = (filter || '').trim().toLowerCase();
@@ -742,9 +750,11 @@
       const libUrl = `https://www.facebook.com/ads/library/?id=${encodeURIComponent(ad.ad_id)}`;
       const body = escapeHtml(ad.body || '').slice(0, 1200);
       const needsExpand = (ad.body || '').length > 220;
-      const thumb = ad.img
-        ? `<img src="${escapeHtml(ad.img)}" alt="" loading="lazy" referrerpolicy="no-referrer">`
+      const imgSrc = safeHref(ad.img);
+      const thumb = imgSrc
+        ? `<img src="${imgSrc}" alt="" loading="lazy" referrerpolicy="no-referrer">`
         : `<span class="placeholder">no image</span>`;
+      const linkHref = safeHref(ad.link);
 
       return `<div class="ad-card${isNew ? ' is-new' : ''}">
         <div class="ad-thumb">${thumb}</div>
@@ -758,7 +768,7 @@
           <div class="ad-card-text${needsExpand ? '' : ' expanded'}" data-full="${escapeHtml(ad.body || '')}">${body || '<em style="color:#555">no body text captured</em>'}</div>
           ${needsExpand ? '<button class="ad-card-expand" type="button">Show more ▾</button>' : ''}
           <div class="ad-card-foot">
-            ${ad.link ? `<a href="${escapeHtml(ad.link)}" target="_blank" rel="noopener">↗ Landing page</a>` : ''}
+            ${linkHref ? `<a href="${linkHref}" target="_blank" rel="noopener">↗ Landing page</a>` : ''}
             ${firstSeen ? `<span>First seen: ${firstSeen.toLocaleDateString()}</span>` : ''}
             ${lastSeen ? `<span>Last seen: ${lastSeen.toLocaleDateString()}</span>` : ''}
           </div>
