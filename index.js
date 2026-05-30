@@ -8,6 +8,7 @@ const { scrapeTarget, scrapeCreatives, screenshotUrl } = require('./lib/scraper'
 const {
   getHistory, upsertHistory, getErrors, logError,
   getCreatives, saveCreatives, saveWeeklySnapshot,
+  getTriggerAllStatus, saveTriggerAllStatus,
 } = require('./lib/storage');
 const { runBatch, todayHKT, nowIsoUtc } = require('./lib/batch');
 
@@ -201,10 +202,16 @@ app.get('/api/data', async (req, res) => {
       }),
     );
     const errors = await getErrors();
+    const triggerAllStatus = await getTriggerAllStatus();
     res.setHeader('Cache-Control', 'no-store');
     res.json({
       targets: rows,
       errors: errors.slice(0, 50),
+      // Render injects RENDER_GIT_COMMIT for every deploy. Surface the short
+      // SHA so the dashboard can show "v1d94cc7" — easy way to verify a
+      // redeploy actually picked up the latest commit.
+      version: (process.env.RENDER_GIT_COMMIT || 'dev').slice(0, 7),
+      trigger_all: triggerAllStatus,
       generated_at: new Date().toISOString(),
     });
   } catch (err) {
@@ -568,6 +575,102 @@ app.get('/api/cron', async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+// --- Self-loop trigger-all (for external cron like Upstash QStash) -----
+//
+// Replaces the old GitHub Actions daily-scrape workflow. External cron
+// (QStash) fires one HTTP POST → we respond 202 immediately → background
+// loop scrapes all 15 targets one by one, exactly like the workflow did
+// (launch fresh browser per target, 90s sleep between). GH Actions quota
+// drops to zero; QStash free tier handles 500 messages/day.
+//
+// Lock prevents overlapping runs (e.g. if QStash retries while a run is
+// still going). Progress + final summary written to trigger_all:status
+// so the dashboard can show "last run: 13/15 OK at HKT 13:21".
+//
+// Auth: ADMIN_TOKEN via ?token= or Authorization: Bearer. When configuring
+// QStash, paste the URL as:
+//   https://<your-render-host>/api/trigger-all?token=<ADMIN_TOKEN>
+let triggerAllRunning = false;
+const TRIGGER_ALL_SLEEP_MS = 90 * 1000;
+
+async function runTriggerAll(reason) {
+  const startedAt = nowIsoUtc();
+  const results = [];
+  await saveTriggerAllStatus({
+    started_at: startedAt, finished_at: null, reason,
+    total: TARGETS.length, current_index: 0, current_id: null,
+    ok: 0, failed: 0, results,
+  });
+  console.log(`[trigger-all] start (${reason}): ${TARGETS.length} target(s)`);
+
+  for (let i = 0; i < TARGETS.length; i++) {
+    const target = TARGETS[i];
+    const tStart = Date.now();
+    await saveTriggerAllStatus({
+      started_at: startedAt, finished_at: null, reason,
+      total: TARGETS.length, current_index: i, current_id: target.id,
+      ok: results.filter((r) => r.ok).length,
+      failed: results.filter((r) => !r.ok).length,
+      results,
+    });
+    try {
+      const { count, tookMs } = await scrapeTarget(target.id);
+      await upsertHistory(target.id, { date: todayHKT(), count, fetched_at_utc: nowIsoUtc() });
+      results.push({ id: target.id, name: target.name, ok: true, count, tookMs });
+      console.log(`[trigger-all]   [${target.name}] count=${count} (${tookMs}ms)`);
+    } catch (err) {
+      const msg = err.message || String(err);
+      console.error(`[trigger-all]   [${target.name}] FAILED:`, msg);
+      await logError({
+        page_id: target.id, name: target.name,
+        stage: 'trigger_all', error: msg, took_ms: Date.now() - tStart,
+      });
+      results.push({ id: target.id, name: target.name, ok: false, error: msg });
+    }
+    if (i < TARGETS.length - 1) {
+      await new Promise((r) => setTimeout(r, TRIGGER_ALL_SLEEP_MS));
+    }
+  }
+
+  const finished = {
+    started_at: startedAt, finished_at: nowIsoUtc(), reason,
+    total: TARGETS.length, current_index: TARGETS.length, current_id: null,
+    ok: results.filter((r) => r.ok).length,
+    failed: results.filter((r) => !r.ok).length,
+    results,
+  };
+  await saveTriggerAllStatus(finished);
+  console.log(`[trigger-all] done: ${finished.ok}/${finished.total} OK, ${finished.failed} failed`);
+  return finished;
+}
+
+app.post('/api/trigger-all', async (req, res) => {
+  const adminToken = process.env.ADMIN_TOKEN;
+  if (!adminToken) return res.status(500).json({ error: 'ADMIN_TOKEN env var not configured.' });
+  const provided = req.query.token || (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+  if (provided !== adminToken) return res.status(403).json({ error: 'Bad or missing token.' });
+
+  if (triggerAllRunning) {
+    return res.status(409).json({ error: 'A trigger-all run is already in progress.' });
+  }
+  triggerAllRunning = true;
+  const reason = (req.query.reason || 'external_cron').toString().slice(0, 64);
+
+  res.status(202).json({
+    ok: true,
+    started: true,
+    total_targets: TARGETS.length,
+    estimated_minutes: Math.ceil((TARGETS.length * TRIGGER_ALL_SLEEP_MS) / 60000),
+    poll: '/api/data (trigger_all field)',
+  });
+
+  // Fire-and-forget background loop. Lock is released in finally so a
+  // crash mid-run doesn't permanently block future runs.
+  runTriggerAll(reason)
+    .catch((err) => console.error('[trigger-all] uncaught:', err))
+    .finally(() => { triggerAllRunning = false; });
 });
 
 function lanIPs() {
