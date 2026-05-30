@@ -1,9 +1,15 @@
 name: Daily Ad Library Scrape
 
+# Schedule disabled — daily scraping is now driven by Upstash QStash
+# calling POST /api/trigger-all on Render directly (see the endpoint in
+# index.js). Keeping workflow_dispatch so this still works as a manual
+# emergency fallback from the GitHub Actions UI.
+#
+# To re-enable: uncomment the `schedule` block below.
 on:
-  schedule:
-    # HKT 13:00 = UTC 05:00
-    - cron: "0 5 * * *"
+  # schedule:
+  #   # HKT 13:00 = UTC 05:00
+  #   - cron: "0 5 * * *"
   workflow_dispatch:
 
 concurrency:
