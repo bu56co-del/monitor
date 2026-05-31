@@ -170,3 +170,14 @@ jobs:
           echo "Biggest gain: $BIG_GAIN"
           echo "Biggest drop: $BIG_DROP"
           echo "Report cached server-side; visit the dashboard to view."
+
+          if [ -n "$GITHUB_STEP_SUMMARY" ]; then
+            {
+              echo "### Weekly report — $WEEK"
+              echo ""
+              echo "- 📈 Biggest gain: **$BIG_GAIN**"
+              echo "- 📉 Biggest drop: **$BIG_DROP**"
+              echo ""
+              echo "Open the dashboard → 📊 Weekly competitor report card to read the full digest."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
