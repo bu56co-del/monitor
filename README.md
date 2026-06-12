@@ -80,6 +80,8 @@ Schedules.
 | `STORAGE_NAMESPACE` | If set, prefixes all Redis keys (e.g. `staging:`). Unset on production. |
 | `AI_PROVIDER` | `gemini` (default), `claude`, or `banana2556` |
 | `GEMINI_API_KEY` / `ANTHROPIC_API_KEY` / `BANANA2556_API_KEY` | AI provider credentials |
+| `BANANA2556_MODEL` | Override the Banana2556 default. Supported: `claude-sonnet-4-6` (default), `gpt-5.4`, `deepseek-v4-flash`, `deepseek-v4-pro`, `deepseek-v4-flash-free` |
+| `GEMINI_MODEL` / `CLAUDE_MODEL` | Optional per-provider model overrides |
 | `RENDER` | Set to `true` to skip in-process cron (Render auto-injects) |
 | `RENDER_GIT_COMMIT` | Auto-injected by Render; surfaces in the dashboard version badge |
 
