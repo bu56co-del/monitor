@@ -10,6 +10,12 @@ on:
     - cron: "0 5 * * *"
   workflow_dispatch:
 
+# Workflow only curls Render; never touches the repo. Strict-read perm
+# overrides the org/repo default (often write-all) — no privilege creep
+# from a compromised step.
+permissions:
+  contents: read
+
 concurrency:
   group: daily-scrape
   cancel-in-progress: false
@@ -83,6 +89,19 @@ jobs:
           echo "========== SUMMARY =========="
           echo "OK: $OK / $((OK + FAIL))"
           echo "Failed: $FAIL / $((OK + FAIL))"
+
+          # Render the same summary onto the workflow run page so you can
+          # eyeball OK/FAIL counts without opening the full log.
+          if [ -n "$GITHUB_STEP_SUMMARY" ]; then
+            {
+              echo "### Daily scrape — $((OK + FAIL)) target(s)"
+              echo ""
+              echo "| Result | Count |"
+              echo "|---|---|"
+              echo "| ✅ OK   | $OK |"
+              echo "| ❌ Fail | $FAIL |"
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
 
           # Only fail the job if ALL targets failed
           if [ "$OK" -eq 0 ] && [ "$FAIL" -gt 0 ]; then
