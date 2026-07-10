@@ -1,0 +1,58 @@
+name: Verify Render deploy
+
+# Manual check that the production Render service is serving a given commit.
+# Polls /api/data (authenticated with ADMIN_TOKEN via header, so the token
+# never appears in the command line) and compares the reported version —
+# Render injects RENDER_GIT_COMMIT on every deploy — against the expected
+# SHA. Passes as soon as they match; fails if the deploy hasn't landed
+# within the timeout.
+on:
+  workflow_dispatch:
+    inputs:
+      expected_sha:
+        description: 'Commit SHA the deploy should be serving (full or short)'
+        required: true
+      timeout_minutes:
+        description: 'How long to keep polling before giving up'
+        required: false
+        default: '20'
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Poll Render until version matches
+        env:
+          RENDER_URL: ${{ secrets.RENDER_URL }}
+          ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
+          EXPECTED: ${{ github.event.inputs.expected_sha }}
+          TIMEOUT_MIN: ${{ github.event.inputs.timeout_minutes }}
+        run: |
+          WANT=$(echo "$EXPECTED" | cut -c1-7)
+          DEADLINE=$(( $(date +%s) + ${TIMEOUT_MIN:-20} * 60 ))
+          echo "Expecting version: $WANT"
+
+          while [ "$(date +%s)" -lt "$DEADLINE" ]; do
+            GOT=$(curl -s --max-time 120 \
+              -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+              "${RENDER_URL%/}/api/data" | jq -r '.version // "unreachable"' 2>/dev/null || echo "unreachable")
+            echo "$(date -u +%H:%M:%S) serving: $GOT"
+            if [ "$GOT" = "$WANT" ]; then
+              echo "✅ Render is serving $WANT"
+              if [ -n "$GITHUB_STEP_SUMMARY" ]; then
+                echo "✅ Render deploy verified: serving \`$WANT\`" >> "$GITHUB_STEP_SUMMARY"
+              fi
+              exit 0
+            fi
+            sleep 30
+          done
+
+          echo "❌ Timed out — Render is still serving $GOT, expected $WANT"
+          if [ -n "$GITHUB_STEP_SUMMARY" ]; then
+            echo "❌ Deploy NOT verified: still serving \`$GOT\`, expected \`$WANT\`" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          exit 1
