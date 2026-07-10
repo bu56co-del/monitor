@@ -90,6 +90,13 @@ jobs:
           echo "OK: $OK / $((OK + FAIL))"
           echo "Failed: $FAIL / $((OK + FAIL))"
 
+          # Ask the server to email the ops alert if half or more targets
+          # failed. Server-side no-op unless alert env vars are configured
+          # on Render; best-effort so it never fails the job.
+          curl -s -X POST --max-time 60 -H "Content-Type: application/json" \
+            -d "{\"ok\":$OK,\"failed\":$FAIL,\"total\":$((OK + FAIL)),\"source\":\"daily-scrape\"}" \
+            "${RENDER_URL%/}/api/admin/alert-summary?token=${ADMIN_TOKEN}" || true
+
           # Render the same summary onto the workflow run page so you can
           # eyeball OK/FAIL counts without opening the full log.
           if [ -n "$GITHUB_STEP_SUMMARY" ]; then

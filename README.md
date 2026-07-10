@@ -84,6 +84,9 @@ Schedules.
 | `GEMINI_MODEL` / `CLAUDE_MODEL` | Optional per-provider model overrides |
 | `RENDER` | Set to `true` to skip in-process cron (Render auto-injects) |
 | `RENDER_GIT_COMMIT` | Auto-injected by Render; surfaces in the dashboard version badge |
+| `RESEND_API_KEY` | [Resend](https://resend.com) API key for failure-alert emails. Unset = alerts disabled. |
+| `ALERT_EMAIL` | Recipient for failure alerts (emailed when ≥ half a scrape batch fails). Env-only by design — never rendered on the dashboard or returned by any API. |
+| `ALERT_EMAIL_FROM` | Optional sender override; defaults to Resend's shared test sender |
 
 GitHub Actions secrets used: `RENDER_URL`, `ADMIN_TOKEN`.
 
@@ -106,6 +109,29 @@ The `id` comes from the `view_all_page_id=` query parameter in a Meta Ad
 Library URL.
 
 ---
+
+## Failure alerts
+
+At the end of every scrape batch (the GitHub Actions workflows and the
+`/api/trigger-all` self-loop) the server checks the failure rate; if
+**half or more** targets failed, it emails `ALERT_EMAIL` via Resend. A
+single flaky target does not alert — it self-heals on the next run.
+
+## Backups
+
+The weekly workflow dumps all Upstash data (per-target history, creatives,
+weekly snapshots, error log, latest report) via `GET /api/admin/export`
+and commits it to `backups/upstash-backup.json` — one file, overwritten
+weekly, with git history keeping every prior version. To restore, read
+the JSON and `SET` the keys back.
+
+## Tests
+
+```sh
+npm test   # node --test — pure-function tests, no browser needed
+```
+
+CI runs them on every push/PR (`.github/workflows/test.yml`).
 
 ## Local dev
 

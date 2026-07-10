@@ -11,15 +11,8 @@ const {
   getTriggerAllStatus, saveTriggerAllStatus,
 } = require('./lib/storage');
 const { runBatch, todayHKT, nowIsoUtc } = require('./lib/batch');
-
-// ISO week label like "2026-W18" — used to bucket weekly creative snapshots.
-function isoWeek(date = new Date()) {
-  const d = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
-  d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay() || 7));
-  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
-  const weekNum = Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
-  return `${d.getUTCFullYear()}-W${String(weekNum).padStart(2, '0')}`;
-}
+const { computeDiffs, isoWeek } = require('./lib/diffs');
+const { alertScrapeSummary } = require('./lib/notify');
 
 const PORT = Number(process.env.PORT) || 3000;
 const TZ = 'Asia/Hong_Kong';
@@ -30,56 +23,10 @@ const TZ = 'Asia/Hong_Kong';
 const FIRST_HOUR = 9;
 const WINDOW_HOURS = 9; // 9,10,11,12,13,14,15,16,17 → 9 slots at xx:30
 
-const WINDOWS = [
-  { label: '1D',  days: 1  },
-  { label: '7D',  days: 7  },
-  { label: '14D', days: 14 },
-  { label: '30D', days: 30 },
-  { label: '60D', days: 60 },
-];
-
 function pickTargetsForHour(hkHour) {
   const offset = hkHour - FIRST_HOUR;
   if (offset < 0 || offset >= WINDOW_HOURS) return [];
   return TARGETS.filter((_, i) => i % WINDOW_HOURS === offset);
-}
-
-function subtractDays(dateStr, days) {
-  const d = new Date(dateStr + 'T00:00:00Z');
-  d.setUTCDate(d.getUTCDate() - days);
-  return d.toISOString().slice(0, 10);
-}
-
-function findRowOnOrBefore(rows, targetDate) {
-  let candidate = null;
-  for (const row of rows) {
-    if (row.date <= targetDate) candidate = row;
-    else break;
-  }
-  return candidate;
-}
-
-function computeDiffs(history) {
-  if (!history || history.length === 0) {
-    return {
-      current: null,
-      diffs: WINDOWS.map(({ label, days }) => ({
-        label, days, baseline_date: null, baseline_count: null, diff: null, pct: null,
-      })),
-      total_snapshots: 0,
-    };
-  }
-  const latest = history[history.length - 1];
-  const prev = history.slice(0, -1);
-  const diffs = WINDOWS.map(({ label, days }) => {
-    const targetDate = subtractDays(latest.date, days);
-    const baseline = findRowOnOrBefore(prev, targetDate);
-    if (!baseline) return { label, days, baseline_date: null, baseline_count: null, diff: null, pct: null };
-    const diff = latest.count - baseline.count;
-    const pct = baseline.count === 0 ? null : Math.round((diff / baseline.count) * 1000) / 10;
-    return { label, days, baseline_date: baseline.date, baseline_count: baseline.count, diff, pct };
-  });
-  return { current: latest, diffs, total_snapshots: history.length };
 }
 
 // --- Express server ----------------------------------------------------
@@ -354,6 +301,27 @@ app.post('/api/scrape-creatives', async (req, res) => {
   }
 });
 
+// In-flight lock shared by every route that calls generateReport. A report
+// run fires up to 16 AI calls and takes minutes with pacing — two overlapping
+// runs waste quota and race on the weekly_report:latest key (dashboard
+// double-click, or the weekly cron colliding with a manual regenerate).
+let reportGenRunning = false;
+
+async function generateReportLocked(opts) {
+  if (reportGenRunning) {
+    const err = new Error('A report generation is already in progress — try again in a minute.');
+    err.status = 409;
+    throw err;
+  }
+  reportGenRunning = true;
+  try {
+    const { generateReport } = require('./lib/report');
+    return await generateReport(opts);
+  } finally {
+    reportGenRunning = false;
+  }
+}
+
 // Build the weekly competitor-intelligence report. Aggregates per-target
 // creative snapshots, asks the configured AI provider to narrate, returns
 // stats + HTML body. Designed to be called from a workflow which then
@@ -364,16 +332,15 @@ app.post('/api/admin/weekly-report', express.json({ limit: '1mb' }), async (req,
   const provided = req.query.token || (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
   if (provided !== adminToken) return res.status(403).json({ error: 'Bad or missing token.' });
 
-  const { generateReport } = require('./lib/report');
   try {
     const opts = {};
     if (req.query.this_week) opts.thisWeek = req.query.this_week;
     if (req.query.last_week) opts.lastWeek = req.query.last_week;
     if (req.body && Array.isArray(req.body.landing_diffs)) opts.landingDiffs = req.body.landing_diffs;
-    const out = await generateReport(opts);
+    const out = await generateReportLocked(opts);
     res.json({ ok: true, ...out });
   } catch (err) {
-    res.status(500).json({ ok: false, error: err.message });
+    res.status(err.status || 500).json({ ok: false, error: err.message });
   }
 });
 
@@ -452,17 +419,16 @@ app.get('/api/weekly-report', async (req, res) => {
 // token; trade-off is anyone with the URL can burn Gemini quota. The full
 // /api/admin/weekly-report sibling stays token-guarded for the workflow.
 app.post('/api/weekly-report/regenerate', express.json({ limit: '1mb' }), async (req, res) => {
-  const { generateReport } = require('./lib/report');
   try {
     const opts = {};
     if (req.body && Array.isArray(req.body.landing_diffs)) opts.landingDiffs = req.body.landing_diffs;
     // Optional ?provider= overrides AI_PROVIDER for this call — lets the
     // dashboard have a backup button that uses a different provider.
     if (req.query.provider) opts.provider = String(req.query.provider).toLowerCase();
-    const out = await generateReport(opts);
+    const out = await generateReportLocked(opts);
     res.json({ ok: true, ...out });
   } catch (err) {
-    res.status(500).json({ ok: false, error: err.message });
+    res.status(err.status || 500).json({ ok: false, error: err.message });
   }
 });
 
@@ -484,6 +450,71 @@ app.get('/api/admin/digest', async (req, res) => {
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
   }
+});
+
+// Full data export for off-site backup. Dumps every target's daily history,
+// cumulative creatives map, and the current + previous weeks' snapshots,
+// plus the error log and latest weekly report. The weekly workflow curls
+// this and commits the JSON into the repo so a lost/flushed Redis doesn't
+// mean losing years of history. Token-guarded; contains no secrets (all of
+// it is data already visible on the dashboard).
+app.get('/api/admin/export', async (req, res) => {
+  const adminToken = process.env.ADMIN_TOKEN;
+  if (!adminToken) return res.status(500).json({ error: 'ADMIN_TOKEN env var not configured.' });
+  const provided = req.query.token || (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+  if (provided !== adminToken) return res.status(403).json({ error: 'Bad or missing token.' });
+
+  const { getWeeklySnapshot, getLatestWeeklyReport } = require('./lib/storage');
+  const { previousIsoWeek } = require('./lib/report');
+  try {
+    const thisWeek = isoWeek();
+    const lastWeek = previousIsoWeek(thisWeek);
+    const targets = {};
+    for (const t of TARGETS) {
+      targets[t.id] = {
+        name: t.name,
+        history: await getHistory(t.id),
+        creatives: await getCreatives(t.id),
+        snapshots: {
+          [thisWeek]: await getWeeklySnapshot(t.id, thisWeek),
+          [lastWeek]: await getWeeklySnapshot(t.id, lastWeek),
+        },
+      };
+    }
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({
+      exported_at: nowIsoUtc(),
+      namespace: process.env.STORAGE_NAMESPACE || '',
+      targets,
+      errors: await getErrors(),
+      weekly_report: await getLatestWeeklyReport(),
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Scrape-batch summary hook for the GitHub Actions workflows. The workflows
+// know their OK/FAIL counts but have no email credentials; the server holds
+// those (env-only), so the workflow posts counts here and the server decides
+// whether the failure rate crosses the alert threshold. Responds with
+// whether an alert was sent — never with any address.
+app.post('/api/admin/alert-summary', express.json({ limit: '64kb' }), async (req, res) => {
+  const adminToken = process.env.ADMIN_TOKEN;
+  if (!adminToken) return res.status(500).json({ error: 'ADMIN_TOKEN env var not configured.' });
+  const provided = req.query.token || (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+  if (provided !== adminToken) return res.status(403).json({ error: 'Bad or missing token.' });
+
+  const body = req.body || {};
+  const ok = Number(body.ok);
+  const failed = Number(body.failed);
+  const total = Number(body.total);
+  if (!Number.isFinite(ok) || !Number.isFinite(failed) || !Number.isFinite(total)) {
+    return res.status(400).json({ error: 'Body must include numeric ok, failed, total.' });
+  }
+  const source = String(body.source || 'workflow').slice(0, 64);
+  const out = await alertScrapeSummary({ ok, failed, total, source });
+  res.json({ ok: true, alert_sent: out.sent, reason: out.reason || null });
 });
 
 // SSRF guard for the screenshot endpoint. Refuses URLs that point at
@@ -643,6 +674,17 @@ async function runTriggerAll(reason) {
   };
   await saveTriggerAllStatus(finished);
   console.log(`[trigger-all] done: ${finished.ok}/${finished.total} OK, ${finished.failed} failed`);
+
+  // Email the ops alert if half or more of the batch failed. No-op unless
+  // RESEND_API_KEY + ALERT_EMAIL are configured; never throws.
+  await alertScrapeSummary({
+    ok: finished.ok,
+    failed: finished.failed,
+    total: finished.total,
+    source: `trigger-all (${reason})`,
+    failedNames: results.filter((r) => !r.ok).map((r) => r.name),
+  });
+
   return finished;
 }
 
