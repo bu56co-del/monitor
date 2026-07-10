@@ -1,12 +1,19 @@
 name: Verify Render deploy
 
-# Manual check that the production Render service is serving a given commit.
+# Checks that the production Render service is serving a given commit.
 # Polls /api/data (authenticated with ADMIN_TOKEN via header, so the token
 # never appears in the command line) and compares the reported version —
 # Render injects RENDER_GIT_COMMIT on every deploy — against the expected
 # SHA. Passes as soon as they match; fails if the deploy hasn't landed
-# within the timeout.
+# within the timeout (GitHub then emails the repo owner — a deploy that
+# never lands is exactly what we want to hear about).
+#
+# Runs automatically on every push to main (verifying that push's SHA;
+# the weekly workflow's [skip ci] commits don't trigger it), and can be
+# dispatched manually with an explicit SHA.
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
     inputs:
       expected_sha:
@@ -29,8 +36,8 @@ jobs:
         env:
           RENDER_URL: ${{ secrets.RENDER_URL }}
           ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
-          EXPECTED: ${{ github.event.inputs.expected_sha }}
-          TIMEOUT_MIN: ${{ github.event.inputs.timeout_minutes }}
+          EXPECTED: ${{ github.event.inputs.expected_sha || github.sha }}
+          TIMEOUT_MIN: ${{ github.event.inputs.timeout_minutes || '20' }}
         run: |
           WANT=$(echo "$EXPECTED" | cut -c1-7)
           DEADLINE=$(( $(date +%s) + ${TIMEOUT_MIN:-20} * 60 ))
