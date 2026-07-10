@@ -1,0 +1,26 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      # The tests only exercise pure functions — skip the ~300MB Chromium
+      # download that puppeteer's postinstall would otherwise pull.
+      PUPPETEER_SKIP_DOWNLOAD: '1'
+      PUPPETEER_SKIP_CHROMIUM_DOWNLOAD: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install --no-audit --no-fund
+      - run: npm test

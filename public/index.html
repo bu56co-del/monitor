@@ -421,7 +421,7 @@
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem;gap:1rem;flex-wrap:wrap">
     <h2 style="margin:0">📊 Weekly competitor report</h2>
     <button id="regen-weekly" title="Re-run AI on the latest creatives in storage (~30 seconds)">🔄 Regenerate now</button>
-    <button id="regen-weekly-banana" title="Fallback when Gemini is blocked — runs the report through Banana2556 (claude-haiku-4.5-as)">🍌 Regenerate via Banana2556</button>
+    <button id="regen-weekly-banana" title="Fallback when Gemini is blocked — runs the report through Banana2556 (claude-sonnet-4-6)">🍌 Regenerate via Banana2556</button>
   </div>
   <div id="weekly-meta">Loading…</div>
   <div id="weekly-body"></div>
@@ -884,6 +884,11 @@
         const sign = d.delta > 0 ? '+' : '';
         return `${d.name} (${sign}${d.delta})`;
       };
+      // Surface which AI actually wrote the report — with the fallback
+      // chain, quality varies by model, so this matters for trust.
+      const aiInfo = data.ai && data.ai.model
+        ? `AI: <strong>${data.ai.model}</strong>${data.ai.fell_back ? ' <span title="Primary provider failed; a fallback produced this report">(fallback)</span>' : ''} &nbsp;·&nbsp; `
+        : '';
       meta.innerHTML =
         `Week ${data.week || '?'} &nbsp;·&nbsp; ` +
         `Targets: <strong>${stats.targets ?? '?'}</strong> &nbsp;·&nbsp; ` +
@@ -891,6 +896,7 @@
         `Dropped: <strong>${stats.removed_ad_ids_total ?? '?'}</strong> &nbsp;·&nbsp; ` +
         `Biggest gain: <strong>${fmtDelta(stats.biggest_gain)}</strong> &nbsp;·&nbsp; ` +
         `Biggest drop: <strong>${fmtDelta(stats.biggest_drop)}</strong> &nbsp;·&nbsp; ` +
+        aiInfo +
         `Generated ${generatedAt}`;
       body.innerHTML = data.html;
     } catch (e) {
