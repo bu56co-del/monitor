@@ -612,7 +612,7 @@ app.get('/api/cron', async (req, res) => {
 //
 // Replaces the old GitHub Actions daily-scrape workflow. External cron
 // (QStash) fires one HTTP POST → we respond 202 immediately → background
-// loop scrapes all 15 targets one by one, exactly like the workflow did
+// loop scrapes all 16 targets one by one, exactly like the workflow did
 // (launch fresh browser per target, 90s sleep between). GH Actions quota
 // drops to zero; QStash free tier handles 500 messages/day.
 //
