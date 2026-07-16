@@ -53,7 +53,7 @@ jobs:
             "${RENDER_URL%/}"
           sleep 10
 
-      - name: Scrape creatives for all 15 targets
+      - name: Scrape creatives for all 16 targets
         env:
           RENDER_URL: ${{ secrets.RENDER_URL }}
           ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
@@ -75,6 +75,7 @@ jobs:
             "111895960717990|Me Paincare"
             "1059523747239272|痛症聯盟 Pain Alliance"
             "810698912118269|Dr.Cure"
+            "1142827238910852|Painaway"
           )
 
           OK=0
