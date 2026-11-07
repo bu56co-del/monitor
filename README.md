@@ -3,7 +3,7 @@
 [![Daily Ad Library Scrape](https://github.com/bu56co-del/monitor/actions/workflows/daily-scrape.yml/badge.svg)](https://github.com/bu56co-del/monitor/actions/workflows/daily-scrape.yml)
 [![Weekly creatives + report](https://github.com/bu56co-del/monitor/actions/workflows/weekly-creatives.yml/badge.svg)](https://github.com/bu56co-del/monitor/actions/workflows/weekly-creatives.yml)
 
-Daily snapshot of how many **active ads** each of ~15 competitor Facebook
+Daily snapshot of how many **active ads** each of 19 competitor Facebook
 Pages is running in Hong Kong, plus a weekly AI-narrated digest of which
 ads are new / dropped / themed around what.
 
@@ -58,7 +58,7 @@ Schedules.
 | `lib/auth.js` | Session-cookie auth + brute-force throttle |
 | `lib/report.js` | Weekly digest builder + AI narration prompt |
 | `lib/ai.js` + `lib/ai/*` | Provider-agnostic AI client (Gemini / Claude / Banana2556) |
-| `lib/targets.js` | The 15 competitor Pages being tracked |
+| `lib/targets.js` | The 19 competitor Pages being tracked |
 | `lib/migrate.js` | Redis namespace migration helper (staging → prod) |
 | `public/index.html` | Single-file dashboard (vanilla JS + dark UI) |
 | `scripts/scrape-all.js` | Render Cron Job entrypoint (alternative to web cron) |

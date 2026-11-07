@@ -41,7 +41,7 @@ jobs:
           RENDER_URL: ${{ secrets.RENDER_URL }}
           ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
         run: |
-          # All 16 targets (same order as lib/targets.js)
+          # All 19 targets (same order as lib/targets.js)
           TARGETS=(
             "110379081699089|HKMPM (original)"
             "89863844963|NYMG"
@@ -59,6 +59,9 @@ jobs:
             "1059523747239272|痛症聯盟 Pain Alliance"
             "810698912118269|Dr.Cure"
             "1142827238910852|Painaway"
+            "559415500890410|Page 559415500890410"
+            "114788361499675|Page 114788361499675"
+            "111043987888766|Page 111043987888766"
           )
 
           OK=0
